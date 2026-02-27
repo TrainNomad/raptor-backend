@@ -23,6 +23,13 @@ let transferIndex  = {};
 let stopsIndex     = [];
 let stopNameMap    = new Map();   // stopId → nom affiché, O(1)
 let tarifIndex     = {};
+let cityIndex      = new Map();   // ville groupée → { city, country, stopIds, stations }
+
+const COUNTRY_NAMES = {
+  FR:'France', IT:'Italie', BE:'Belgique', DE:'Allemagne',
+  NL:'Pays-Bas', GB:'Royaume-Uni', ES:'Espagne', PT:'Portugal',
+  CH:'Suisse', AT:'Autriche', PL:'Pologne', CZ:'Tchéquie', SK:'Slovaquie',
+};
 
 // Index RAPTOR global — construit UNE SEULE FOIS au démarrage
 let globalStopToTrips = null;
@@ -176,13 +183,34 @@ function transferTime(fromId, toEntry) {
 // ─── Autocomplete ─────────────────────────────────────────────────────────────
 
 function buildStopsIndex() {
+  cityIndex = new Map();
+
   const stFile = path.join(__dirname, 'stations.json');
   if (fs.existsSync(stFile)) {
     const raw = JSON.parse(fs.readFileSync(stFile, 'utf8'));
     for (const s of raw) {
-      stopsIndex.push({ name:s.name, stopIds:s.stopIds||[], operators:s.operators||[], country:s.country||'FR', lat:s.lat||0, lon:s.lon||0 });
+      const city    = s.city    || s.name;
+      const country = s.country || 'FR';
+      stopsIndex.push({ name:s.name, city, country, stopIds:s.stopIds||[], operators:s.operators||[], lat:s.lat||0, lon:s.lon||0 });
+
+      const key = city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') + ':' + country;
+      if (!cityIndex.has(key)) {
+        cityIndex.set(key, {
+          city, country, countryName: COUNTRY_NAMES[country] || country,
+          stopIds: new Set(s.stopIds||[]), ops: new Set(s.operators||[]),
+          stations: [], lat: s.lat||0, lon: s.lon||0,
+        });
+      }
+      const ce = cityIndex.get(key);
+      for (const sid of (s.stopIds||[])) ce.stopIds.add(sid);
+      for (const op  of (s.operators||[])) ce.ops.add(op);
+      ce.stations.push({ name: s.name, stopIds: s.stopIds||[] });
+    }
+    for (const [key, ce] of cityIndex) {
+      if (ce.stations.length < 2) cityIndex.delete(key);
     }
     console.log('  Autocomplete (stations.json) : ' + stopsIndex.length + ' gares');
+    console.log('  Villes multi-gares           : ' + cityIndex.size);
     return;
   }
   const garesFile = path.join(__dirname, 'gares-de-voyageurs.json');
@@ -196,7 +224,7 @@ function buildStopsIndex() {
       for (const sid of sids) for (const s of (transferIndex[sid]||[])) extra.add(s);
       if (!extra.size) continue;
       const ops = [...new Set([...extra].map(sid => sid.split(':')[0]))];
-      stopsIndex.push({ name:gare.nom, stopIds:[...extra], operators:ops, country:'FR',
+      stopsIndex.push({ name:gare.nom, city:gare.nom, country:'FR', stopIds:[...extra], operators:ops,
         lat:gare.position_geographique?.lat||0, lon:gare.position_geographique?.lon||0 });
     }
     const assigned = new Set(stopsIndex.flatMap(s => s.stopIds));
@@ -217,8 +245,28 @@ function searchStops(query, limit=10) {
   const res = [];
   for (const e of stopsIndex) {
     const nom = e.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    if (nom.includes(q)) { res.push(e); if (res.length >= limit) break; }
+    if (nom.includes(q)) { res.push({ type:'station', ...e }); if (res.length >= limit) break; }
   }
+  return res;
+}
+
+function searchCities(query) {
+  const q = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const res = [];
+  for (const [, ce] of cityIndex) {
+    const cityNorm = ce.city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    if (!cityNorm.startsWith(q) && !cityNorm.includes(q)) continue;
+    res.push({
+      type: 'city', name: ce.city, country: ce.country, countryName: ce.countryName,
+      stopIds: [...ce.stopIds], operators: [...ce.ops].sort(),
+      stations: ce.stations, lat: ce.lat, lon: ce.lon,
+    });
+  }
+  res.sort((a, b) => {
+    const aN = a.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const bN = b.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    return (aN.startsWith(q) ? 0 : 1) - (bN.startsWith(q) ? 0 : 1) || a.name.localeCompare(b.name,'fr');
+  });
   return res;
 }
 
@@ -679,6 +727,12 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/stops') {
     const qs = (q.q||'').trim();
     return jsonResp(res, qs ? searchStops(qs, 10) : []);
+  }
+
+  if (p === '/api/cities') {
+    const qs = (q.q || '').trim();
+    if (!qs || qs.length < 2) return jsonResp(res, []);
+    return jsonResp(res, searchCities(qs));
   }
 
   if (p === '/api/search') {
