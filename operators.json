@@ -7,6 +7,12 @@
     
   },
   {
+    "id": "ES",
+    "name": "Eurostar",
+    "gtfs_dir": "./gtfs/eurostar",
+    "gtfs_url": "https://integration-storage.dm.eurostar.com/gtfs-prod/gtfs_static_commercial_v2.zip"
+  },
+  {
     "id": "TI",
     "name": "Trenitalia France",
     "gtfs_dir": "./gtfs/trenitalia",
