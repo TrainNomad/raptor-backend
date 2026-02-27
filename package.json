@@ -2,7 +2,7 @@
   "name": "raptor-backend",
   "version": "1.0.0",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --max-old-space-size=450 server.js",
     "build": "bash scripts/update-gtfs.sh",
     "update-gtfs": "bash scripts/update-gtfs.sh"
   },
