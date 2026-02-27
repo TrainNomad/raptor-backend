@@ -460,27 +460,6 @@ async function ingestOperator(op) {
     }
   }
 
-  // Connexions
-  // NOTE: Ne pas re-trier par seq ici — l'ordre chronologique a déjà été établi
-  // dans la boucle de pré-traitement (fix backtracking TI). Un re-sort par seq
-  // annulerait le réordonnancement et remettrait le trajet retour en tête.
-  const connections = [];
-  for (const [trip_id, stops] of Object.entries(tripStops)) {
-    const route_id   = tripToRoute[trip_id]   || P('unknown');
-    const service_id = tripToService[trip_id] || '';
-    for (let i = 0; i < stops.length - 1; i++) {
-      const from = stops[i], to = stops[i+1];
-      if (from.dep_time === null || to.arr_time === null) continue;
-      connections.push({
-        dep_stop: from.stop_id, arr_stop: to.stop_id,
-        dep_time: from.dep_time, arr_time: to.arr_time,
-        trip_id: P(trip_id), route_id, service_id,
-        headsign: tripToHeadsign[trip_id] || '',
-        operator: operatorId,
-      });
-    }
-  }
-
   // RAPTOR structures
   const routesByStop = {};
   const routeStops   = {};
@@ -533,18 +512,16 @@ async function ingestOperator(op) {
     routesByStopSerial[stop] = [...routes];
   }
 
-  console.log(`    connexions     : ${connections.length.toLocaleString()}`);
   console.log(`    routes         : ${Object.keys(routeInfo).length.toLocaleString()}`);
   console.log(`    arrêts         : ${Object.keys(stopsDict).length.toLocaleString()}`);
 
-  return { connections, stopsDict, routeInfo, routesByStopSerial, routeStops, routeTrips, calendarIndex };
+  return { stopsDict, routeInfo, routesByStopSerial, routeStops, routeTrips, calendarIndex };
 }
 
 // ─── Fusion multi-opérateurs ──────────────────────────────────────────────────
 
 function mergeResults(results) {
   const merged = {
-    connections:   [],
     stopsDict:     {},
     routeInfo:     {},
     routesByStop:  {},   // stop_id → Set
@@ -555,10 +532,6 @@ function mergeResults(results) {
 
   for (const r of results) {
     if (!r) continue;
-
-    // ⚠ NE PAS utiliser push(...bigArray) → stack overflow sur >100k éléments
-    // concat alloue un nouveau tableau sans passer par la pile d'appels
-    merged.connections = merged.connections.concat(r.connections);
 
     Object.assign(merged.stopsDict,  r.stopsDict);
     Object.assign(merged.routeInfo,  r.routeInfo);
@@ -581,7 +554,7 @@ function mergeResults(results) {
     }
   }
 
-  merged.connections.sort((a, b) => a.dep_time - b.dep_time);
+
 
   // Sérialiser routesByStop (Set → Array)
   const routesByStopSerial = {};
@@ -641,7 +614,6 @@ async function main() {
     console.log(`  ✓ ${filename.padEnd(26)} ${size} MB`);
   };
 
-  writeJSON('connections.json',    merged.connections);
   writeJSON('stops.json',          merged.stopsDict);
   writeJSON('routes_info.json',    merged.routeInfo);
   writeJSON('routes_by_stop.json', merged.routesByStop);
@@ -654,7 +626,6 @@ async function main() {
   const meta = {
     generated_at:      new Date().toISOString(),
     operators:         operators.map(o => o.id),
-    total_connections: merged.connections.length,
     total_stops:       Object.keys(merged.stopsDict).length,
     total_routes:      Object.keys(merged.routeInfo).length,
     total_trips:       Object.values(merged.routeTrips).reduce((s, t) => s + t.length, 0),
@@ -669,7 +640,6 @@ async function main() {
 
   console.log('\n══ Résumé ════════════════════════════════════════════');
   console.log(`  Opérateurs         : ${meta.operators.join(', ')}`);
-  console.log(`  Connexions totales : ${meta.total_connections.toLocaleString()}`);
   console.log(`  Arrêts             : ${meta.total_stops.toLocaleString()}`);
   console.log(`  Dates              : ${meta.date_range.first} → ${meta.date_range.last}`);
   console.log(`  Correspondances    : ${meta.total_transfers.toLocaleString()} arrêts inter-op`);

@@ -17,7 +17,7 @@ const MIN_TRANSFER_SAME  = 3  * 60;  // 3 min  — même opérateur / même gare
 const MIN_TRANSFER_CROSS = 10 * 60;  // 10 min — inter-opérateurs (SNCF ↔ TI)
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
-let connections, stops, routesInfo, routesByStop, routeStops, routeTrips, calendarIndex, meta;
+let stops, routesInfo, routesByStop, routeStops, routeTrips, calendarIndex, meta;
 let transferIndex  = {};
 let stopsIndex     = [];
 let stopNameMap    = new Map();   // stopId → nom affiché, O(1)
@@ -36,7 +36,6 @@ function initEngine() {
   console.log('\n🚂 Chargement moteur RAPTOR (SNCF + Trenitalia)...');
   const t = Date.now();
 
-  connections   = loadJSON('connections.json');
   stops         = loadJSON('stops.json');
   routesInfo    = loadJSON('routes_info.json');
   routesByStop  = loadJSON('routes_by_stop.json');
@@ -51,7 +50,7 @@ function initEngine() {
     transferIndex = loadJSON('transfer_index.json');
     console.log('  Correspondances : ' + Object.keys(transferIndex).length + ' arrêts');
   } else {
-    // 1. Fallback UIC pour les stops SNCF
+    // Fallback UIC pour les stops SNCF
     const uicMap = {};
     for (const sid of Object.keys(stops)) {
       const m = sid.match(/-(\d{8})$/);
@@ -66,7 +65,6 @@ function initEngine() {
   }
 
   // Liaison inter-opérateurs SNCF ↔ TI par nom de gare normalisé
-  // (tourne toujours, que transfer_index.json existe ou non)
   (function linkSncfTI() {
     const norm = s => (s || '').toLowerCase()
       .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -124,7 +122,8 @@ function initEngine() {
     console.log('  Tarifs : ' + Object.keys(tarifIndex).length + ' entrées');
   }
 
-  console.log('✅ Prêt en ' + (Date.now()-t) + 'ms — ' + connections.length.toLocaleString() + ' connexions\n');
+  const totalTrips = Object.values(routeTrips).reduce((s, t) => s + t.length, 0);
+  console.log('✅ Prêt en ' + (Date.now()-t) + 'ms — ' + totalTrips.toLocaleString() + ' trips chargés\n');
 }
 
 // ─── Noms des gares ───────────────────────────────────────────────────────────
@@ -210,22 +209,15 @@ function searchStops(query, limit=10) {
 
 function secondsToHHMM(s) {
   if (s == null || s === Infinity) return '--:--';
-  // GTFS peut stocker des temps > 86400 pour les trains de nuit (ex: 25:30 = 01:30 lendemain)
-  // On garde l'affichage brut mod 24h pour la lisibilité
   const totalMin = Math.floor(s / 60);
   return String(Math.floor(totalMin / 60) % 24).padStart(2,'0') + ':' + String(totalMin % 60).padStart(2,'0');
 }
 function timeToSeconds(t) { const [h,m] = t.split(':').map(Number); return h*3600+m*60; }
 function extractOperator(sid) { const m=(sid||'').match(/^([A-Z]+):/); return m?m[1]:'SNCF'; }
 
-// Résout un StopArea en ses StopPoints constituants (même UIC)
-// Ex: SNCF:StopArea:OCE87686006 → [SNCF:StopPoint:OCETGV INOUI-87686006, ...]
-// mode 'origin' : on élargit aussi aux sœurs inter-opérateurs (embarquement)
-// mode 'dest'   : on élargit uniquement intra-opérateur (même quai) pour ne pas confondre gares proches
 function resolveStopIds(ids, mode = 'origin') {
   const out = new Set(ids);
   for (const id of ids) {
-    // Cas StopArea SNCF : extraire l'UIC depuis "OCE87686006"
     const areaMatch = id.match(/StopArea:OCE(\d{8})$/);
     if (areaMatch) {
       const uic = areaMatch[1];
@@ -233,13 +225,10 @@ function resolveStopIds(ids, mode = 'origin') {
         if (sid.endsWith('-' + uic)) out.add(sid);
       }
     }
-    // Ajouter aussi les sœurs connues dans transferIndex
     for (const sister of (transferIndex[id] || [])) {
-      // En mode destination, on n'ajoute les sœurs inter-opérateurs que si l'utilisateur
-      // a explicitement sélectionné un stop TI ou SNCF (évite de fusionner gares différentes)
       if (mode === 'dest') {
         const sameOp = extractOperator(id) === extractOperator(sister);
-        if (!sameOp) continue; // ne pas élargir cross-operator pour la destination
+        if (!sameOp) continue;
       }
       out.add(sister);
     }
@@ -277,14 +266,7 @@ function getFilteredData(dateISO) {
 
 // ─── Détection type de train ──────────────────────────────────────────────────
 
-/**
- * Le GTFS Trenitalia France (data.gouv.fr) utilise des trip_id numériques
- * opaques style "30-50194974-1-40". La source fiable est le nom de la route :
- * route_long_name = "PARIS-GARE-DE-LYON/MILANO CENTRALE"
- * On cherche "FRECCIAROSSA" dans route_short_name ou route_long_name.
- */
 function detectTrainTypeTI(tripId, routeId) {
-  // Priorité 1 : nom de la route (le plus fiable)
   const route   = routesInfo[routeId] || {};
   const combined = ((route.long||'') + ' ' + (route.short||'')).toUpperCase();
   if (combined.includes('FRECCIAROSSA'))  return 'FRECCIAROSSA';
@@ -292,27 +274,20 @@ function detectTrainTypeTI(tripId, routeId) {
   if (combined.includes('INTERCITY') || combined.includes('INTERCITES')) return 'IC_IT';
   if (combined.includes('REGIONALE')) return 'REGIONALE_IT';
 
-  // Priorité 2 : trip_id si format lisible
   const raw = (tripId||'').replace(/^TI:/i,'').toUpperCase();
   if (raw.includes('FRECCIAROSSA') || /^FR\d/.test(raw) || /^9\d{3}/.test(raw)) return 'FRECCIAROSSA';
   if (raw.includes('EURONIGHT') || /^(EN|ICN)\d/.test(raw)) return 'EURONIGHT';
   if (/^IC\d/.test(raw)) return 'IC_IT';
   if (/^RV?\d/.test(raw)) return 'REGIONALE_IT';
 
-  return 'FRECCIAROSSA'; // Trenitalia France = Frecciarossa par défaut
+  return 'FRECCIAROSSA';
 }
 
-/** Nom d'affichage propre pour un leg TI (évite l'ID GTFS brut). */
 function tiRouteName(trainType) {
   return { FRECCIAROSSA:'Frecciarossa', EURONIGHT:'Euronight',
            IC_IT:'Intercity', REGIONALE_IT:'Regionale' }[trainType] || 'Frecciarossa';
 }
 
-/**
- * Correction UTC→Europe/Paris pour les horaires Trenitalia.
- * Le GTFS TI stocke en UTC ; SNCF stocke en heure locale (CET/CEST).
- * +3600s en hiver (UTC+1), +7200s en été (UTC+2).
- */
 function tiAdjust(seconds, dateISO) {
   if (seconds == null) return seconds;
   if (dateISO) {
@@ -328,7 +303,6 @@ function detectTrainType(fromStopId, tripId, stored, op, routeId) {
 
   if (operator === 'TI') return detectTrainTypeTI(tripId, routeId);
 
-  // SNCF
   const tid  = (tripId || '').toUpperCase();
   const m    = (fromStopId || '').match(/StopPoint:OCE(.+)-\d{8}$/);
   const quai = m ? m[1].trim() : '';
@@ -366,29 +340,11 @@ function buildStopToTrips(tripsData) {
   return index;
 }
 
-/**
- * Scanne un trip à partir de fromIdx.
- * Écrit DIRECTEMENT dans `parent` (pas de tampon intermédiaire).
- * C'est la clé : parent contient TOUJOURS le chemin complet, tous rounds confondus.
- */
-/**
- * Scanne un trip depuis fromIdx.
- *
- * RAPTOR correct : la condition d'embarquement utilise tauBest[sid]
- * (meilleur temps cumulatif sur tous les rounds), pas seulement le round
- * précédent. Cela permet de boarder depuis l'origine au round 2 ou depuis
- * un arrêt intermédiaire atteint deux rounds en arrière.
- *
- * `tau_cur` et `parent` ne sont mis à jour que si on améliore tau_best.
- */
 function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
   let boarded  = false;
   let boardStop = null;
   let boardDep  = null;
 
-  // Les horaires TI sont stockés en UTC dans le GTFS ; SNCF est en heure locale.
-  // Pour que la comparaison avec tauBest (heure locale) soit correcte, on doit
-  // ajuster les temps TI AVANT de les comparer — pas seulement à l'affichage.
   const isTI = trip.operator === 'TI';
 
   for (let i = fromIdx; i < trip.stop_times.length; i++) {
@@ -413,10 +369,9 @@ function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
     const arr = (isTI && rawArr != null) ? tiAdjust(rawArr, dateISO) : rawArr;
     if (arr == null) continue;
 
-    // N'améliorer que si c'est réellement mieux (évite les cycles)
     if (arr < (tauBest[sid] ?? Infinity)) {
-      tauBest[sid]  = arr;  // mise à jour cumulée
-      tau_cur[sid]  = arr;  // marque comme amélioré ce round
+      tauBest[sid]  = arr;
+      tau_cur[sid]  = arr;
       parent[sid]   = {
         from_stop:  boardStop,
         trip_id:    trip.trip_id,
@@ -430,20 +385,12 @@ function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
   }
 }
 
-/**
- * RAPTOR multi-origines/multi-destinations.
- *
- * - tau_best : meilleure arrivée cumulée (tous rounds) → utilisé pour boarding
- * - tau_cur  : améliorations du round courant → détermine les stops marqués
- * - parent   : table unique mise à jour en place → reconstruction complète
- */
 function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
   const tau_best  = {};
   const parent    = {};
   const originSet = new Set();
   let   marked    = new Set();
 
-  // Initialisation : tous les stops d'origine + leurs sœurs de quai
   for (const oid of originIds) {
     if ((tau_best[oid] ?? Infinity) > startTime) {
       tau_best[oid] = startTime;
@@ -465,22 +412,20 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
   }
 
   const results   = [];
-  const destSet   = destIds ? new Set(destIds) : null; // null = one-to-all
-  const collected = new Set(); // pour one-to-all : stops déjà reconstruits
+  const destSet   = destIds ? new Set(destIds) : null;
+  const collected = new Set();
 
   for (let round = 1; round <= MAX_ROUNDS; round++) {
     const tau_prev_round = { ...tau_best };
     const tau_cur        = {};
     const newMarked      = new Set();
 
-    // Scanner les trips depuis les stops marqués
     for (const stop of marked) {
       for (const { routeId, trip, idx } of (stopToTripsData[stop] || [])) {
         scanTrip(trip, idx, tau_best, tau_cur, parent, routeId, dateISO);
       }
     }
 
-    // Propagation inter-quais / inter-opérateurs
     for (const [sid, arr] of Object.entries(tau_cur)) {
       if (arr < (tau_prev_round[sid] ?? Infinity)) newMarked.add(sid);
 
@@ -499,7 +444,6 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
     marked = newMarked;
 
     if (destSet) {
-      // Mode classique : vérifier les destinations fixes
       for (const did of destSet) {
         if (tau_cur[did] !== undefined && tau_cur[did] < (tau_prev_round[did] ?? Infinity)) {
           const j = reconstructJourney(parent, originSet, did, dateISO);
@@ -512,7 +456,6 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
         }
       }
     } else {
-      // Mode one-to-all : collecter TOUS les stops améliorés (hors origine)
       for (const sid of Object.keys(tau_cur)) {
         if (originSet.has(sid) || collected.has(sid)) continue;
         if (tau_cur[sid] < (tau_prev_round[sid] ?? Infinity)) {
@@ -531,11 +474,6 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
   return results;
 }
 
-/**
- * Lance plusieurs RAPTOR avec des heures de départ croissantes.
- * L'index stopToTrips n'est PAS reconstruit entre les appels.
- * allowedTypes : Set de types autorisés (null = tous)
- */
 function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, dateISO, allowedTypes = null) {
   const seen    = new Set();
   const results = [];
@@ -549,7 +487,6 @@ function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, d
     let maxDepThis = -1;
     for (const j of batch) {
       if (j.dep_time < startTime) continue;
-      // Filtre types de train : si allowedTypes défini, au moins un leg doit matcher
       if (allowedTypes && !j.train_types.some(tt => allowedTypes.has(tt))) continue;
       const key = j.legs.map(l => l.trip_id).join('|');
       if (!seen.has(key)) {
@@ -593,13 +530,11 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     const isTI    = op === 'TI';
     const route   = routesInfo[p.route_id] || {};
 
-    // Les temps sont déjà en heure locale (tiAdjust appliqué dans scanTrip).
     const depTime = p.dep_time;
     const arrTime = p.arr_time;
 
     const trainType = detectTrainType(p.from_stop, p.trip_id, p.train_type, op, p.route_id);
 
-    // Nom d'affichage : pour TI, utiliser le type lisible au lieu de l'ID GTFS brut
     const routeName = isTI
       ? tiRouteName(trainType)
       : (route.short || route.long || p.route_id);
@@ -734,7 +669,6 @@ const server = http.createServer(async (req, res) => {
     const limit   = Math.min(parseInt(q.limit||'8'), 32);
     const startSec = Math.max(timeToSeconds(timeStr) + offset, afterDep || 0);
 
-    // Filtre types de train optionnel : ?train_types=INOUI,TER,OUIGO
     const allowedTypes = q.train_types
       ? new Set(q.train_types.split(',').map(s => s.trim()).filter(Boolean))
       : null;
@@ -743,7 +677,6 @@ const server = http.createServer(async (req, res) => {
     const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
     const uniqueTo   = resolveStopIds([...new Set(toIds)], 'dest');
 
-    // DEBUG temporaire
     console.log('\n[SEARCH]', dateStr || 'sans date', timeStr);
     console.log('  from IDs reçus   :', fromIds);
     console.log('  from IDs résolus :', uniqueFrom);
@@ -774,17 +707,6 @@ const server = http.createServer(async (req, res) => {
     return jsonResp(res, { tarifs, profil });
   }
 
-  // ─── EXPLORE : toutes les destinations depuis une gare ───────────────────
-  // GET /api/explore?from=<stopIds>&date=2026-03-01
-  //
-  // Stratégie : RAPTOR "one-to-all"
-  //   1. On fait tourner raptorCore() depuis les stopIds d'origine.
-  //   2. On collecte TOUTES les gares atteintes (pas seulement une destination fixée).
-  //   3. On enrichit chaque destination avec ses coordonnées depuis stopsIndex.
-  //   4. On déduplique par gare logique (même nom normalisé ou même cluster UIC).
-  //
-  // Plusieurs créneaux horaires (06h, 08h, 10h, 12h, 14h, 16h, 18h) sont
-  // parcourus et seul le MEILLEUR journey par destination est conservé.
   if (p === '/api/explore') {
     const t0      = Date.now();
     const fromIds = (q.from||'').split(',').filter(Boolean);
@@ -798,16 +720,12 @@ const server = http.createServer(async (req, res) => {
     const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
     const originSet  = new Set(uniqueFrom);
 
-    // Créneaux à explorer
     const slots = ['05:00','07:00','09:00','11:00','13:00','15:00','17:00','19:00'];
-
-    // Map stopId → meilleur journey
-    const bestByStop = {};   // stopId → journey
+    const bestByStop = {};
 
     for (const timeStr of slots) {
       const startSec = timeToSeconds(timeStr);
       const reached  = raptorCore(uniqueFrom, null, startSec, stt, dateStr);
-      // raptorCore avec destIds=null → mode "one-to-all" (voir ci-dessous)
       for (const j of reached) {
         const lastLeg = j.legs?.[j.legs.length - 1];
         if (!lastLeg) continue;
@@ -819,8 +737,6 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // Enrichir avec coordonnées depuis stopsIndex
-    // Construire un index nom-normalisé → {lat, lon} à partir de stopsIndex
     const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();
     const coordsByStopId = new Map();
     for (const st of stopsIndex) {
@@ -830,7 +746,6 @@ const server = http.createServer(async (req, res) => {
         }
       }
     }
-    // Aussi par nom normalisé (fallback)
     const coordsByName = new Map();
     for (const st of stopsIndex) {
       if (st.lat && st.lon) coordsByName.set(norm(st.name), { lat: st.lat, lon: st.lon });
@@ -855,9 +770,6 @@ const server = http.createServer(async (req, res) => {
     return jsonResp(res, { journeys, computed_ms: Date.now()-t0 });
   }
 
-  // ─── DEBUG : inspecter les trips d'une route ──────────────────────────────
-  // GET /api/debug/trips?route=TI:9287&date=2026-03-01
-  // GET /api/debug/trips?stop=TI:10007&date=2026-03-01
   if (p === '/api/debug/trips') {
     const routeId = q.route;
     const stopId  = q.stop;
