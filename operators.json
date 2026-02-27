@@ -4,7 +4,6 @@
     "name": "SNCF",
     "gtfs_dir": "./gtfs/sncf",
     "gtfs_url": "https://eu.ftp.opendatasoft.com/sncf/plandata/Export_OpenData_SNCF_GTFS_NewTripId.zip"
-    
   },
   {
     "id": "ES",
@@ -17,5 +16,11 @@
     "name": "Trenitalia France",
     "gtfs_dir": "./gtfs/trenitalia",
     "gtfs_url": "https://thello.axelor.com/public/gtfs/gtfs.zip"
+  },
+  {
+    "id": "SNCB",
+    "name": "SNCB Belgique",
+    "gtfs_dir": "./gtfs/sncb",
+    "gtfs_url": "https://gtfs.irail.be/nmbs/nmbs-latest.zip"
   }
 ]
