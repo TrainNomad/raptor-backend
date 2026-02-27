@@ -544,6 +544,26 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
   return results;
 }
 
+// Retourne le nom de la station groupée contenant ce stopId (via stopsIndex)
+function resolveStopName(stopId) {
+  for (const station of stopsIndex) {
+    if ((station.stopIds || []).includes(stopId)) return station.name;
+  }
+  return cleanStopName(stopId);
+}
+
+// Retourne la clé ville d'un stopId (pour dédupliquer les arrivées dans la même ville)
+function cityKeyOfStop(stopId) {
+  for (const s of stopsIndex) {
+    if ((s.stopIds || []).includes(stopId)) {
+      const city    = s.city || s.name;
+      const country = s.country || 'FR';
+      return city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') + ':' + country;
+    }
+  }
+  return stopId; // fallback : stopId lui-même
+}
+
 function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, dateISO, allowedTypes = null) {
   const seen    = new Set();
   const results = [];
@@ -577,11 +597,28 @@ function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, d
   }
 
   results.sort((a, b) =>
-    a.transfers - b.transfers ||          // 1. directs en premier
-    a.duration  - b.duration  ||          // 2. plus court en durée
-    a.dep_time  - b.dep_time              // 3. départ le plus tôt
+    a.transfers - b.transfers ||
+    a.duration  - b.duration  ||
+    a.dep_time  - b.dep_time
   );
-  return results.slice(0, limit);
+
+  // Dédupliquer par ville d'arrivée + heure de départ :
+  // pour un même départ ET une même ville d'arrivée, ne garder que le plus rapide.
+  // Cela évite d'avoir "arriver Montparnasse" ET "arriver Saint-Lazare" pour le même train.
+  const dedupedByArrCity = new Map(); // "depTime:cityKey" → journey
+  for (const j of results) {
+    const lastStop  = j.legs[j.legs.length - 1].to_id;
+    const cityKey   = cityKeyOfStop(lastStop);
+    const dedupeKey = j.dep_time + ':' + cityKey;
+    const existing  = dedupedByArrCity.get(dedupeKey);
+    if (!existing || j.duration < existing.duration) {
+      dedupedByArrCity.set(dedupeKey, j);
+    }
+  }
+
+  return [...dedupedByArrCity.values()]
+    .sort((a, b) => a.transfers - b.transfers || a.duration - b.duration || a.dep_time - b.dep_time)
+    .slice(0, limit);
 }
 
 // ─── Reconstruction du journey ────────────────────────────────────────────────
@@ -598,7 +635,12 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     const p = parent[current];
     if (!p) return null;
 
-    if (p.is_transfer) { current = p.from_stop; continue; }
+    if (p.is_transfer) {
+      // Transfert inter-gares (interCity) en fin de trajet = inutile, on remonte
+      // jusqu'au vrai arrêt de train
+      current = p.from_stop;
+      continue;
+    }
 
     const op      = p.operator || extractOperator(p.from_stop);
     const isTI    = op === 'TI';
@@ -616,8 +658,8 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     legs.unshift({
       from_id:    p.from_stop,
       to_id:      current,
-      from_name:  cleanStopName(p.from_stop),
-      to_name:    cleanStopName(current),
+      from_name:  resolveStopName(p.from_stop),
+      to_name:    resolveStopName(current),
       dep_time:   depTime,
       arr_time:   arrTime,
       dep_str:    secondsToHHMM(depTime),
