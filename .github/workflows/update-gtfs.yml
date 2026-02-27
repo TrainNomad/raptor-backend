@@ -1,0 +1,14 @@
+name: Update GTFS Weekly
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Chaque lundi à 3h UTC
+  workflow_dispatch:        # Permet aussi de le lancer manuellement
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render redeploy
+        run: |
+          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
