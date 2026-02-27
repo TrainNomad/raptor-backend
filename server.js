@@ -307,8 +307,11 @@ function timeToSeconds(t) { const [h,m] = t.split(':').map(Number); return h*360
 function extractOperator(sid) { const m=(sid||'').match(/^([A-Z]+):/); return m?m[1]:'SNCF'; }
 
 function resolveStopIds(ids, mode = 'origin') {
-  const out = new Set(ids);
+  const out      = new Set(ids);
+  const inputSet = new Set(ids);   // snapshot des IDs reçus AVANT expansion
+
   for (const id of ids) {
+    // Expansion StopArea → StopPoints (inchangée)
     const areaMatch = id.match(/StopArea:OCE(\d{8})$/);
     if (areaMatch) {
       const uic = areaMatch[1];
@@ -316,8 +319,15 @@ function resolveStopIds(ids, mode = 'origin') {
         if (sid.endsWith('-' + uic)) out.add(sid);
       }
     }
+
+    // Expansion via transferIndex
     for (const sister of (transferIndex[id] || [])) {
       if (mode === 'dest') {
+        // Ne pas ajouter une sister qui est déjà dans la liste reçue
+        // (évite de cross-contaminer les gares d'une ville groupée)
+        if (inputSet.has(sister)) continue;
+
+        // Ne garder que le même opérateur (comportement original)
         const sameOp = extractOperator(id) === extractOperator(sister);
         if (!sameOp) continue;
       }
@@ -601,7 +611,14 @@ function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, d
   return results.slice(0, limit);
 }
 
-// ─── Reconstruction du journey ────────────────────────────────────────────────
+function resolveStopName(stopId) {
+  // Cherche dans stopsIndex la station qui contient ce stopId
+  for (const station of stopsIndex) {
+    if ((station.stopIds || []).includes(stopId)) return station.name;
+  }
+  // Fallback : nom du stop GTFS brut
+  return cleanStopName(stopId);
+}
 
 function reconstructJourney(parent, originSet, destId, dateISO) {
   const legs    = [];
@@ -633,8 +650,8 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     legs.unshift({
       from_id:    p.from_stop,
       to_id:      current,
-      from_name:  cleanStopName(p.from_stop),
-      to_name:    cleanStopName(current),
+      from_name:  resolveStopName(p.from_stop),   // ← résolution via stopsIndex
+      to_name:    resolveStopName(current),        // ← résolution via stopsIndex
       dep_time:   depTime,
       arr_time:   arrTime,
       dep_str:    secondsToHHMM(depTime),
@@ -751,7 +768,7 @@ const server = http.createServer(async (req, res) => {
     if (!qs || qs.length < 2) return jsonResp(res, []);
     return jsonResp(res, searchCities(qs));
   }
-  
+
   if (p === '/api/search') {
     const t0 = Date.now();
     const fromIds = (q.from||'').split(',').filter(Boolean);
