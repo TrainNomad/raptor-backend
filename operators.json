@@ -21,6 +21,6 @@
     "id": "SNCB",
     "name": "SNCB Belgique",
     "gtfs_dir": "./gtfs/sncb",
-    "gtfs_url": "https://gtfs.irail.be/nmbs/nmbs-latest.zip"
+    "gtfs_url": "https://api-management-discovery-production.azure-api.net/api/gtfs/feed/nmbssncb/static"
   }
 ]
