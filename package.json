@@ -1,0 +1,15 @@
+{
+  "name": "raptor-backend",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js",
+    "build": "bash scripts/update-gtfs.sh",
+    "update-gtfs": "bash scripts/update-gtfs.sh"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+
+
+
