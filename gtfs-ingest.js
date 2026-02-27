@@ -255,6 +255,54 @@ function buildTransferIndex(stopsDict) {
     console.log(`  ✅ ${manualLinks} liaisons inter-opérateurs depuis stations.json`);
   }
 
+  // 3. Correspondances inter-gares dans la même ville (via stations.json + champ city)
+  //    Ex : Paris Montparnasse ↔ Paris Gare du Nord — même ville, gares différentes
+  //    Ces liens sont marqués { id, interCity: true } pour que server.js applique
+  //    un temps de correspondance spécifique (MIN_TRANSFER_CITY, ex : 45 min).
+  if (fs.existsSync(stationsPath)) {
+    const stations = JSON.parse(fs.readFileSync(stationsPath, 'utf8'));
+
+    // Regrouper les stations par ville + pays
+    const cityGroups = new Map();
+    for (const station of stations) {
+      const city    = station.city || station.name;
+      const country = station.country || 'FR';
+      const key     = city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                      + ':' + country;
+      if (!cityGroups.has(key)) cityGroups.set(key, []);
+      cityGroups.get(key).push(station);
+    }
+
+    let cityLinks = 0;
+    for (const [, group] of cityGroups) {
+      if (group.length < 2) continue;
+
+      for (let gi = 0; gi < group.length; gi++) {
+        for (let gj = gi + 1; gj < group.length; gj++) {
+          for (const idA of (group[gi].stopIds || [])) {
+            if (!stopsDict[idA]) continue;
+            for (const idB of (group[gj].stopIds || [])) {
+              if (!stopsDict[idB]) continue;
+              if (!transferIndex[idA]) transferIndex[idA] = [];
+              if (!transferIndex[idB]) transferIndex[idB] = [];
+              // On stocke un objet { id, interCity:true } pour distinguer ces liens
+              // des correspondances quai-à-quai normales
+              if (!transferIndex[idA].some(x => (x.id || x) === idB)) {
+                transferIndex[idA].push({ id: idB, interCity: true });
+                cityLinks++;
+              }
+              if (!transferIndex[idB].some(x => (x.id || x) === idA)) {
+                transferIndex[idB].push({ id: idA, interCity: true });
+                cityLinks++;
+              }
+            }
+          }
+        }
+      }
+    }
+    console.log(`  🏙  ${cityLinks} liens inter-gares (même ville, gares différentes)`);
+  }
+
   console.log(`  Total : ${Object.keys(transferIndex).length} arrêts avec correspondances`);
   return transferIndex;
 }
