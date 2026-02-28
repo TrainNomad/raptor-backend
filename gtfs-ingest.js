@@ -248,6 +248,32 @@ function buildTransferIndex(stopsDict) {
   const transferIndex = {};
   const ids = Object.keys(stopsDict);
 
+  // 0. Liens parent_station → tous les quais enfants sont frères entre eux.
+  //    Plus fiable et O(n) vs la proximité GPS O(n²).
+  //    Couvre Bruxelles-Midi (8814001 / 8814001_9 / 8814001_10 …), Bruges, etc.
+  {
+    const parentToChildren = new Map(); // parentId → [childId, ...]
+    for (const id of ids) {
+      const parent = stopsDict[id].parent_station;
+      if (!parent) continue;
+      if (!parentToChildren.has(parent)) parentToChildren.set(parent, []);
+      parentToChildren.get(parent).push(id);
+    }
+    let parentLinks = 0;
+    for (const [, children] of parentToChildren) {
+      for (let ci = 0; ci < children.length; ci++) {
+        for (let cj = ci + 1; cj < children.length; cj++) {
+          const a = children[ci], b = children[cj];
+          if (!transferIndex[a]) transferIndex[a] = [];
+          if (!transferIndex[b]) transferIndex[b] = [];
+          if (!transferIndex[a].includes(b)) { transferIndex[a].push(b); parentLinks++; }
+          if (!transferIndex[b].includes(a)) { transferIndex[b].push(a); parentLinks++; }
+        }
+      }
+    }
+    console.log(`  parent_station  : ${parentLinks} liens quai<->quai (${parentToChildren.size} gares)`);
+  }
+
   // 1. Proximité GPS < 300m
   for (let i = 0; i < ids.length; i++) {
     const s1 = stopsDict[ids[i]];
@@ -408,10 +434,12 @@ async function ingestOperator(op) {
   for (const s of stopsRaw) {
     if (!usedStopIds.has(s.stop_id)) continue;
     stopsDict[P(s.stop_id)] = {
-      name:     s.stop_name || s.stop_id,
-      lat:      parseFloat(s.stop_lat)  || 0,
-      lon:      parseFloat(s.stop_lon)  || 0,
-      operator: operatorId,
+      name:          s.stop_name || s.stop_id,
+      lat:           parseFloat(s.stop_lat)  || 0,
+      lon:           parseFloat(s.stop_lon)  || 0,
+      operator:      operatorId,
+      // Conserver le parent_station (avec préfixe opérateur) pour lier les quais entre eux
+      parent_station: s.parent_station ? P(s.parent_station) : null,
     };
   }
   console.log(`    stops gardés    : ${Object.keys(stopsDict).length.toLocaleString()}`);
