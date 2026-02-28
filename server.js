@@ -247,6 +247,13 @@ function searchStops(query, limit=10) {
     const nom = e.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
     if (nom.includes(q)) { res.push({ type:'station', ...e }); if (res.length >= limit) break; }
   }
+  // Trier par ville pour que le groupement côté client fonctionne correctement
+  res.sort((a, b) => {
+    const cityA = (a.city || a.name).toLowerCase();
+    const cityB = (b.city || b.name).toLowerCase();
+    if (cityA !== cityB) return cityA.localeCompare(cityB, 'fr');
+    return (a.name || '').localeCompare(b.name || '', 'fr');
+  });
   return res;
 }
 
