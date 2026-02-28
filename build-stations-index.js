@@ -458,7 +458,7 @@ function countryFromStopId(sid) {
   const uic = m[1];
   const prefix = uic.slice(0, 2);
   const map = { '87':'FR','86':'FR','88':'BE','80':'DE','81':'DE','82':'AT',
-                '83':'IT','84':'ES','85':'PT','70':'GB','71':'GB','74':'CH',
+                '83':'IT','84':'ES','85':'PT','71':'ES','70':'GB','74':'CH',  // ✅ 71=Espagne, 70=GB
                 '79':'NL','78':'NL','55':'PL','54':'CZ','53':'SK' };
   return map[prefix] || 'FR';
 }
