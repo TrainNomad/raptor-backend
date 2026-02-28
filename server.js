@@ -477,7 +477,10 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
         parent[sister] = { from_stop:oid, trip_id:null, route_id:null,
                            dep_time:startTime, arr_time:t, is_transfer:true };
       }
-      originSet.add(sister);
+      // Les sisters interCity (autre gare de la même ville) ne sont PAS des origines :
+      // elles sont joignables par transfert mais un trajet qui en repart
+      // doit compter une correspondance.
+      if (!entry.interCity) originSet.add(sister);
     }
   }
 
