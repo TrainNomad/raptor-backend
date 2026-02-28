@@ -57,6 +57,13 @@ const CITY_PREFIXES = [
   'Koln', 'Dusseldorf', 'Dortmund', 'Duisburg', 'Essen', 'Aachen', 'Frankfurt',
   // UK
   'London', 'Londres',
+  // Espagne — villes multi-gares
+  'Madrid', 'Barcelona', 'Valencia', 'Sevilla', 'Zaragoza', 'Bilbao',
+  'Malaga', 'Alicante', 'Cordoba', 'Valladolid', 'San Sebastian',
+  'Donostia', 'Vitoria', 'Pamplona', 'Murcia', 'Palma', 'Las Palmas',
+  'Granada', 'Toledo', 'Salamanca', 'Cadiz', 'Burgos', 'Leon',
+  'Santander', 'Oviedo', 'Gijon', 'Vigo', 'Santiago', 'A Coruna',
+  'Tarragona', 'Lleida', 'Girona', 'Albacete', 'Cuenca', 'Ciudad Real',
 ];
 
 function extractCity(name) {
@@ -443,6 +450,9 @@ function normalizeStationName(n) {
 // Détecte le pays d'une gare orpheline depuis son stop_id ou son UIC
 // Les UIC commencent par le code pays : 87/86 = FR, 88 = BE, 80 = DE, 83 = IT, etc.
 function countryFromStopId(sid) {
+  // ✅ Opérateurs espagnols — stop IDs courts (5 chiffres), pas de préfixe UIC
+  if (sid.startsWith('RENFE:') || sid.startsWith('OUIGO_ES:')) return 'ES';
+
   const m = sid.match(/(\d{7,9})$/);
   if (!m) return 'FR';
   const uic = m[1];
@@ -481,7 +491,7 @@ for (const [sid, stop] of Object.entries(stops)) {
   const name = stop.name || sid;
   const key  = normalizeStationName(name);
   if (!orphanGroups.has(key)) {
-    orphanGroups.set(key, { name, country: op === 'TI' ? 'IT' : countryFromStopId(sid),
+    orphanGroups.set(key, { name, country: op === 'TI' ? 'IT' : countryFromStopId(sid),  // ✅ RENFE/OUIGO_ES → 'ES' via countryFromStopId
       lat: stop.lat||0, lon: stop.lon||0, stopIds: [sid], operators: new Set([op]) });
   } else {
     const e = orphanGroups.get(key);
@@ -584,9 +594,11 @@ if (toRemoveIdxs.size > 0) {
 // ── Tri ───────────────────────────────────────────────────────────────────────
 stations.sort((a, b) => {
   const score = s =>
-    (s.operators.includes('SNCF') ? 4 : 0) +
-    (s.operators.includes('ES')   ? 2 : 0) +
-    (s.operators.includes('TI')   ? 1 : 0);
+    (s.operators.includes('SNCF')     ? 8 : 0) +
+    (s.operators.includes('ES')       ? 4 : 0) +
+    (s.operators.includes('TI')       ? 2 : 0) +
+    (s.operators.includes('RENFE')    ? 6 : 0) +
+    (s.operators.includes('OUIGO_ES') ? 5 : 0);
   if (score(b) !== score(a)) return score(b) - score(a);
   return a.name.localeCompare(b.name, 'fr');
 });
@@ -607,6 +619,10 @@ const CHECK = [
   'Milano Centrale', 'Milano Porta Garibaldi',
   'Torino Porta Susa', 'Torino Porta Nuova', 'Ventimiglia',
   'Amsterdam-Centraal', 'Bruxelles Midi', 'St-Pancras-International',
+  // Espagne
+  'Madrid Pta.Atocha - Almudena Grandes', 'Madrid-Chamartin-Clara Campoamor',
+  'Barcelona Sants', 'Valencia Joaquin Sorolla', 'Sevilla Santa Justa',
+  'Zaragoza-Delicias', 'Malaga-Maria Zambrano',
 ];
 for (const nom of CHECK) {
   const normName = str => str.toLowerCase().replace(/’/g, "'");
