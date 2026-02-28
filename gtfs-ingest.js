@@ -93,8 +93,20 @@ function shouldKeepRoute(operatorId, r) {
     case 'SNCB':
       return SNCB_KEEP_SHORT.has(short);
 
+    case 'RENFE': {
+      // ✅ Exclure banlieue/commuter Renfe
+      const s = (r.route_short_name || '').trim().toUpperCase();
+      const RENFE_EXCLUDE = new Set(['PROXIMDAD', 'TRENCELTA', 'FEVE']);
+      if (RENFE_EXCLUDE.has(s)) return false;
+      return rtype !== 3;
+    }
+
+    case 'OUIGO_ES':
+      // Tout garder pour OUIGO España
+      return rtype !== 3;
+
     default:
-      // TI, ES, DB, RENFE : garder tout le ferroviaire
+      // TI, ES, DB : garder tout le ferroviaire
       return rtype !== 3;
   }
 }
@@ -190,9 +202,27 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
     }
 
     case 'RENFE': {
-      if (tid.includes('AVE'))   return 'AVE';
-      if (tid.includes('ALVIA')) return 'ALVIA';
-      return 'RENFE';
+      // ✅ Les trip_id Renfe sont numériques → on utilise route_short_name
+      const rs = (routeShort || '').trim().toUpperCase();
+      if (rs === 'AVE INT')   return 'AVE_INT';
+      if (rs === 'AVE')       return 'AVE';
+      if (rs === 'AVLO')      return 'AVLO';
+      if (rs === 'ALVIA')     return 'ALVIA';
+      if (rs === 'AVANT EXP') return 'AVANT';
+      if (rs === 'AVANT')     return 'AVANT';
+      if (rs === 'EUROMED')   return 'EUROMED';
+      if (rs === 'INTERCITY') return 'INTERCITY_ES';
+      if (rs === 'MD')        return 'MD';
+      if (rs === 'REG.EXP.')  return 'REG_EXP';
+      if (rs === 'REGIONAL')  return 'REGIONAL_ES';
+      if (rs === 'TRENCELTA') return 'REGIONAL_ES';
+      if (rs === 'PROXIMDAD') return 'MD';
+      return 'RENFE'; // fallback générique
+    }
+
+    case 'OUIGO_ES': {
+      // OUIGO España — toujours un seul type
+      return 'OUIGO_ES';
     }
 
     default:
