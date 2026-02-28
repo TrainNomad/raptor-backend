@@ -22,5 +22,20 @@
     "name": "SNCB Belgique",
     "gtfs_dir": "./gtfs/sncb",
     "gtfs_url": "https://api-management-discovery-production.azure-api.net/api/gtfs/feed/nmbssncb/static"
+  },
+  {
+    "id": "RENFE",
+    "name": "Renfe (AVE · Larga Distancia · Media Distancia)",
+    "gtfs_dir": "./gtfs/renfe",
+    "gtfs_url": "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip",
+    "gtfs_nap_id": "897",
+    "note": "Feed officiel Renfe — couvre AVE (haute vitesse), Larga Distancia et Media Distancia (regionaux). Mis a jour quotidiennement. URL directe publique, pas besoin de cle API. Fallback : NAP ID 897 via nap.transportes.gob.es"
+  },
+  {
+    "id": "OUIGO_ES",
+    "name": "OUIGO Espana",
+    "gtfs_dir": "./gtfs/ouigo_es",
+    "gtfs_nap_id": "1766",
+    "note": "Telechargement via API NAP (cle requise) — voir script download_spain_gtfs.js"
   }
 ]
