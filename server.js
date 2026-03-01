@@ -40,6 +40,12 @@ function loadJSON(filename) {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 
+// ─── État du moteur ───────────────────────────────────────────────────────────
+let engineReady    = false;
+let engineError    = null;
+let engineLoadedAt = null;
+let engineLoadMs   = null;
+
 function initEngine() {
   console.log('\n🚂 Chargement moteur RAPTOR (SNCF + Trenitalia)...');
   const t = Date.now();
@@ -131,7 +137,10 @@ function initEngine() {
   }
 
   const totalTrips = Object.values(routeTrips).reduce((s, t) => s + t.length, 0);
-  console.log('✅ Prêt en ' + (Date.now()-t) + 'ms — ' + totalTrips.toLocaleString() + ' trips chargés\n');
+  engineLoadMs   = Date.now() - t;
+  engineLoadedAt = new Date().toISOString();
+  engineReady    = true;
+  console.log('✅ Prêt en ' + engineLoadMs + 'ms — ' + totalTrips.toLocaleString() + ' trips chargés\n');
 }
 
 // ─── Noms des gares ───────────────────────────────────────────────────────────
@@ -772,7 +781,29 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); res.end(); return; }
 
+  // Répondre immédiatement aux pings keep-alive, même si l'engine charge encore
+  if (p === '/eveille') {
+    return jsonResp(res, {
+      ok:        true,
+      ready:     engineReady,
+      uptime_s:  Math.floor(process.uptime()),
+      loaded_at: engineLoadedAt,
+      load_ms:   engineLoadMs,
+      message:   engineReady ? '✅ Moteur opérationnel' : '⏳ Chargement en cours…',
+    });
+  }
+
+  // Bloquer les routes API tant que l'engine n'est pas prêt
+  if (p.startsWith('/api/') && !engineReady) {
+    return jsonResp(res, {
+      error:   'Serveur en cours de démarrage, réessayez dans quelques secondes.',
+      ready:   false,
+      load_ms: engineLoadMs,
+    }, 503);
+  }
+
   if (p === '/api/meta') {
+    if (!engineReady) return jsonResp(res, { warming: true }, 503);
     return jsonResp(res, { ...meta, operators: meta.operators || ['SNCF','TI'] });
   }
 
@@ -954,5 +985,17 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404); res.end('Not found');
 });
 
-initEngine();
-server.listen(PORT, () => console.log('🌐 http://localhost:' + PORT));
+// ─── Démarrage ────────────────────────────────────────────────────────────────
+// Le serveur écoute IMMÉDIATEMENT (Render considère le process prêt dès que
+// le port est ouvert). L'engine se charge en arrière-plan : /eveille répond
+// pendant ce temps, les autres routes retournent 503 jusqu'à engineReady=true.
+
+server.listen(PORT, () => {
+  console.log('🌐 http://localhost:' + PORT + '  (moteur en cours de chargement…)');
+  try {
+    initEngine();
+  } catch (err) {
+    engineError = err.message;
+    console.error('❌ Échec chargement moteur :', err);
+  }
+});
