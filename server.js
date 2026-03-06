@@ -22,7 +22,10 @@ let stops, routesInfo, routesByStop, routeStops, routeTrips, calendarIndex, meta
 let transferIndex  = {};
 let stopsIndex     = [];
 let stopNameMap    = new Map();   // stopId → nom affiché, O(1)
-let tarifIndex     = {};
+let stopStationMap = new Map();   // stopId → station name groupée, O(1)
+let stopCityKeyMap  = new Map();   // stopId → 'city:country' key, O(1)
+let globalCoordsMap = new Map();   // stopId → {lat, lon} précompilé au démarrage
+let tarifIndex      = {};
 let cityIndex      = new Map();   // ville groupée → { city, country, stopIds, stations }
 
 const COUNTRY_NAMES = {
@@ -120,6 +123,17 @@ function initEngine() {
   buildStopNameMap();
   buildStopsIndex();
 
+  // Map coordonnées globale — construite une seule fois, réutilisée par /api/explore
+  globalCoordsMap = new Map();
+  for (const st of stopsIndex) {
+    for (const sid of (st.stopIds||[])) {
+      if (!globalCoordsMap.has(sid) && st.lat && st.lon) {
+        globalCoordsMap.set(sid, { lat: st.lat, lon: st.lon, name: st.name });
+      }
+    }
+  }
+  console.log('  Coords map : ' + globalCoordsMap.size + ' stops géolocalisés');
+
   // Tarifs
   const tarifsFile = path.join(__dirname, 'tarifs-tgv-inoui-ouigo.json');
   if (fs.existsSync(tarifsFile)) {
@@ -201,6 +215,11 @@ function buildStopsIndex() {
       const city    = s.city    || s.name;
       const country = s.country || 'FR';
       stopsIndex.push({ name:s.name, city, country, stopIds:s.stopIds||[], operators:s.operators||[], lat:s.lat||0, lon:s.lon||0 });
+      const _ck = city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') + ':' + country;
+      for (const _sid of (s.stopIds||[])) {
+        stopStationMap.set(_sid, s.name);
+        stopCityKeyMap.set(_sid, _ck);
+      }
 
       const key = city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'') + ':' + country;
       if (!cityIndex.has(key)) {
@@ -563,24 +582,14 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
   return results;
 }
 
-// Retourne le nom de la station groupée contenant ce stopId (via stopsIndex)
+// Retourne le nom de la station groupée contenant ce stopId — O(1)
 function resolveStopName(stopId) {
-  for (const station of stopsIndex) {
-    if ((station.stopIds || []).includes(stopId)) return station.name;
-  }
-  return cleanStopName(stopId);
+  return stopStationMap.get(stopId) || cleanStopName(stopId);
 }
 
-// Retourne la clé ville d'un stopId (pour dédupliquer les arrivées dans la même ville)
+// Retourne la clé ville d'un stopId — O(1)
 function cityKeyOfStop(stopId) {
-  for (const s of stopsIndex) {
-    if ((s.stopIds || []).includes(stopId)) {
-      const city    = s.city || s.name;
-      const country = s.country || 'FR';
-      return city.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') + ':' + country;
-    }
-  }
-  return stopId; // fallback : stopId lui-même
+  return stopCityKeyMap.get(stopId) || stopId;
 }
 
 function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, dateISO, allowedTypes = null) {
@@ -883,7 +892,9 @@ const server = http.createServer(async (req, res) => {
     const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
     const originSet  = new Set(uniqueFrom);
 
-    const slots = ['05:00','07:00','09:00','11:00','13:00','15:00','17:00','19:00'];
+    // 3 slots couvrent matin/midi/soir — RAPTOR est idempotent sur les arrivées
+    // max-duration déjà capturées au round précédent. Gain ×2.5 vs 8 slots.
+    const slots = ['06:00', '11:00', '17:00'];
     const bestByStop = {};
 
     for (const timeStr of slots) {
@@ -900,15 +911,8 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // coordsByStopId : Map précompilée au démarrage (O(1)), pas reconstruite ici
     const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();
-    const coordsByStopId = new Map();
-    for (const st of stopsIndex) {
-      for (const sid of (st.stopIds||[])) {
-        if (!coordsByStopId.has(sid) && st.lat && st.lon) {
-          coordsByStopId.set(sid, { lat: st.lat, lon: st.lon, name: st.name });
-        }
-      }
-    }
     const coordsByName = new Map();
     for (const st of stopsIndex) {
       if (st.lat && st.lon) coordsByName.set(norm(st.name), { lat: st.lat, lon: st.lon });
@@ -916,7 +920,7 @@ const server = http.createServer(async (req, res) => {
 
     const journeys = [];
     for (const [sid, j] of Object.entries(bestByStop)) {
-      const coords = coordsByStopId.get(sid);
+      const coords = globalCoordsMap.get(sid);
       const lastLeg = j.legs?.[j.legs.length - 1];
       const destName = lastLeg?.to_name || cleanStopName(sid);
       const fallback = coordsByName.get(norm(destName));
