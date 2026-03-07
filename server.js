@@ -490,7 +490,7 @@ function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
   }
 }
 
-function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
+function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, extraOrigins = null) {
   const tau_best  = {};
   const parent    = {};
   const originSet = new Set();
@@ -512,10 +512,11 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO) {
         parent[sister] = { from_stop:oid, trip_id:null, route_id:null,
                            dep_time:startTime, arr_time:t, is_transfer:true };
       }
-      // Les sisters interCity (autre gare de la même ville) ne sont PAS des origines :
-      // elles sont joignables par transfert mais un trajet qui en repart
-      // doit compter une correspondance.
-      if (!entry.interCity) originSet.add(sister);
+      // Les sisters interCity (autre gare de la même ville) ne sont PAS des origines
+      // par défaut (un trajet qui repart d'une gare interCity compte une correspondance).
+      // Exception : si extraOrigins contient cette gare (sélection ville explicite),
+      // elle est une vraie origine — l'utilisateur veut partir de n'importe quelle gare.
+      if (!entry.interCity || (extraOrigins && extraOrigins.has(sister))) originSet.add(sister);
     }
   }
 
@@ -592,7 +593,7 @@ function cityKeyOfStop(stopId) {
   return stopCityKeyMap.get(stopId) || stopId;
 }
 
-function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, dateISO, allowedTypes = null) {
+function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, dateISO, allowedTypes = null, extraOrigins = null) {
   const seen    = new Set();
   const results = [];
   let t       = startTime;
@@ -600,7 +601,7 @@ function searchJourneys(originIds, destIds, startTime, stopToTripsData, limit, d
   let noNewCount = 0;
 
   while (results.length < limit && t <= maxT) {
-    const batch = raptorCore(originIds, destIds, t, stopToTripsData, dateISO);
+    const batch = raptorCore(originIds, destIds, t, stopToTripsData, dateISO, extraOrigins);
 
     let maxDepThis = -1;
     for (const j of batch) {
@@ -846,8 +847,12 @@ const server = http.createServer(async (req, res) => {
       : null;
 
     const { stopToTrips: stt } = getFilteredData(dateStr);
+    const fromCity   = q.fromCity === '1';  // sélection ville côté client
+    const toCity     = q.toCity   === '1';
     const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
     const uniqueTo   = resolveStopIds([...new Set(toIds)], 'dest');
+    // Si sélection ville : toutes les gares envoyées sont des origines réelles
+    const extraOrigins = fromCity ? new Set(fromIds) : null;
 
     console.log('\n[SEARCH]', dateStr || 'sans date', timeStr);
     console.log('  from IDs reçus   :', fromIds);
@@ -857,7 +862,7 @@ const server = http.createServer(async (req, res) => {
     console.log('  from dans stopToTrips :', uniqueFrom.filter(id => stt[id]).length, '/', uniqueFrom.length);
     console.log('  to   dans stopToTrips :', uniqueTo.filter(id => stt[id]).length, '/', uniqueTo.length);
 
-    const journeys = searchJourneys(uniqueFrom, uniqueTo, startSec, stt, limit, dateStr, allowedTypes);
+    const journeys = searchJourneys(uniqueFrom, uniqueTo, startSec, stt, limit, dateStr, allowedTypes, extraOrigins);
     console.log('  Résultats :', journeys.length, journeys.map(j => j.dep_str + '->' + j.arr_str + ' (' + j.transfers + ' corresp)'));
 
     const lastDep   = journeys.length ? Math.max(...journeys.map(j => j.dep_time||0)) : startSec;
@@ -889,8 +894,10 @@ const server = http.createServer(async (req, res) => {
     console.log('\n[EXPLORE]', dateStr || 'sans date', '| from:', fromIds.slice(0,3).join(','));
 
     const { stopToTrips: stt } = getFilteredData(dateStr);
+    const fromCity   = q.fromCity === '1';
     const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
     const originSet  = new Set(uniqueFrom);
+    const extraOrigins = fromCity ? new Set(fromIds) : null;
 
     // 3 slots couvrent matin/midi/soir — RAPTOR est idempotent sur les arrivées
     // max-duration déjà capturées au round précédent. Gain ×2.5 vs 8 slots.
@@ -899,7 +906,7 @@ const server = http.createServer(async (req, res) => {
 
     for (const timeStr of slots) {
       const startSec = timeToSeconds(timeStr);
-      const reached  = raptorCore(uniqueFrom, null, startSec, stt, dateStr);
+      const reached  = raptorCore(uniqueFrom, null, startSec, stt, dateStr, extraOrigins);
       for (const j of reached) {
         const lastLeg = j.legs?.[j.legs.length - 1];
         if (!lastLeg) continue;
