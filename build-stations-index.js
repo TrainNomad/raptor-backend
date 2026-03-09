@@ -230,45 +230,23 @@ for (const sid of Object.keys(stops)) {
 }
 console.log('  Index CP      : ' + Object.keys(cpRawToStops).length + ' stops CP\n');
 
-// ── Ponts ibériques manuels CP ↔ RENFE ───────────────────────────────────────
-// Résultat d'une analyse GPS exhaustive des GTFS CP et Renfe.
-// Chaque paire [stopA, stopB] force la fusion dans la même entrée stations.json.
-//
-// Corridors validés :
-//   NORD  : Vigo ↔ Porto (train Celta — Renfe circule sur infrastructure CP)
-//     - Valença/Valença do Minho    CP:94_7005  ↔ RENFE:22402    (28m)
-//     - Viana do Castelo            CP:94_18002 ↔ RENFE:94033    (6m)
-//     - Porto Campanha              CP:94_2006  ↔ RENFE:94346    (54m)
-//   CENTRE: Vilar Formoso (CP terminus, pas d'équivalent Renfe actif)
-//   SUD   : Elvas ↔ Badajoz  CP:94_57497 ↔ RENFE:37606  (14km — 2 villes distinctes)
-//           → lien interCity uniquement (correspondance bus ~15 min)
-//
-// Format : [stopId_A, stopId_B, type]
-//   "merge"     → même quai physique, fusionner dans une seule station
-//   "interCity" → villes différentes, lien de correspondance avec délai majoré
-// const IBERIAN_BRIDGES = [
-//   // Corridor Nord : Vigo ↔ Porto (Renfe utilise l'infra CP)
-//   ['CP:94_7005',  'RENFE:22402', 'merge'],     // Valença / Valença do Minho — 28m
-//   ['CP:94_18002', 'RENFE:94033', 'merge'],     // Viana do Castelo — 6m
-//   ['CP:94_2006',  'RENFE:94346', 'merge'],     // Porto Campanha — 54m
+// ── Index des ponts ibériques (calculé depuis IBERIAN_BRIDGES déclaré en haut) ─
+// IBERIAN_BRIDGES = tableau d'objets { a, b, name, interCity }
+//   interCity: false → même quai physique, fusionner stopIds dans une seule station
+//   interCity: true  → villes différentes, lien de correspondance avec délai majoré
 
-//   // Corridor Sud : Elvas (PT) ↔ Badajoz (ES) — 2 villes, 14km
-//   // Correspondance interCity (bus ou taxi ~15 min de trajet + attente)
-//   ['CP:94_57497', 'RENFE:37606', 'interCity'], // Elvas ↔ Badajoz
-// ];
+const iberianMergeIndex = {};   // stopId → [stopIds partenaires à fusionner]
+const iberianInterCity  = [];   // [[stopA, stopB], ...] pour les liens interCity
 
-// Index rapide stopId → [stopIds à fusionner avec lui]
-const iberianMergeIndex = {};   // pour type "merge"
-const iberianInterCity  = [];   // pour type "interCity"
-
-for (const [a, b, type] of IBERIAN_BRIDGES) {
-  if (!stops[a] || !stops[b]) continue; // l'un des deux n'est pas dans le GTFS chargé
-  if (type === 'merge') {
+for (const bridge of IBERIAN_BRIDGES) {
+  const { a, b, interCity } = bridge;
+  if (!stops[a] || !stops[b]) continue; // l'un des deux absent du GTFS chargé
+  if (!interCity) {
     if (!iberianMergeIndex[a]) iberianMergeIndex[a] = [];
     if (!iberianMergeIndex[b]) iberianMergeIndex[b] = [];
     iberianMergeIndex[a].push(b);
     iberianMergeIndex[b].push(a);
-  } else if (type === 'interCity') {
+  } else {
     iberianInterCity.push([a, b]);
   }
 }
@@ -803,24 +781,36 @@ fs.writeFileSync(OUT_FILE, JSON.stringify(stations, null, 2), 'utf8');
 // Après finalisation de stations.json, on enrichit le transfer_index.json
 // avec les liens interCity Elvas↔Badajoz pour que server.js puisse calculer
 // les correspondances cross-border avec le bon délai (MIN_TRANSFER_CITY).
-if (global._iberianInterCityPairs && global._iberianInterCityPairs.length > 0) {
+if (iberianInterCity.length > 0) {
   const xferPath = path.join(DATA_DIR, 'transfer_index.json');
   if (fs.existsSync(xferPath)) {
     const xferData = JSON.parse(fs.readFileSync(xferPath, 'utf8'));
+
+    // Récupérer tous les stopIds de chaque station concernée
+    const sidToIdx = new Map();
+    for (let i = 0; i < stations.length; i++)
+      for (const sid of stations[i].stopIds) sidToIdx.set(sid, i);
+
     let injected = 0;
-    for (const [idsA, idsB] of global._iberianInterCityPairs) {
-      for (const idA of idsA) {
+    for (const [stopA, stopB] of iberianInterCity) {
+      const stA = stations[sidToIdx.get(stopA)];
+      const stB = stations[sidToIdx.get(stopB)];
+      if (!stA || !stB) {
+        console.warn(`  ⚠  Pont interCity transfer_index ignoré : ${stopA} ou ${stopB} introuvable`);
+        continue;
+      }
+      for (const idA of stA.stopIds) {
         if (!xferData[idA]) xferData[idA] = [];
-        for (const idB of idsB) {
+        for (const idB of stB.stopIds) {
           if (!xferData[idA].some(x => (x.id || x) === idB)) {
             xferData[idA].push({ id: idB, interCity: true });
             injected++;
           }
         }
       }
-      for (const idB of idsB) {
+      for (const idB of stB.stopIds) {
         if (!xferData[idB]) xferData[idB] = [];
-        for (const idA of idsA) {
+        for (const idA of stA.stopIds) {
           if (!xferData[idB].some(x => (x.id || x) === idA)) {
             xferData[idB].push({ id: idA, interCity: true });
             injected++;

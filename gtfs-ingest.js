@@ -10,7 +10,7 @@
  *   SNCB    : garde uniquement IC, EC, NJ, OTC
  *   TI      : tout (déjà uniquement Frecciarossa)
  *   ES      : tout (Eurostar)
- *   RENFE   : exclut PROXIMDAD, TRENCELTA, FEVE et bus
+ *   RENFE   : exclut PROXIMDAD, FEVE et bus (TRENCELTA gardé — liaison ES↔PT)
  *   OUIGO_ES: tout sauf bus
  *   CP      : garde uniquement AP (Alfa Pendular), IC (Intercidades), IR (Inter-regional)
  */
@@ -99,7 +99,8 @@ function shouldKeepRoute(operatorId, r) {
     case 'RENFE': {
       // ✅ Exclure banlieue/commuter Renfe
       const s = (r.route_short_name || '').trim().toUpperCase();
-      const RENFE_EXCLUDE = new Set(['PROXIMDAD', 'TRENCELTA', 'FEVE']);
+      // TRENCELTA gardé : seule liaison ferroviaire directe Vigo ↔ Porto (ES↔PT)
+      const RENFE_EXCLUDE = new Set(['PROXIMDAD', 'FEVE']);
       if (RENFE_EXCLUDE.has(s)) return false;
       return rtype !== 3;
     }
