@@ -64,6 +64,10 @@ const CITY_PREFIXES = [
   'Granada', 'Toledo', 'Salamanca', 'Cadiz', 'Burgos', 'Leon',
   'Santander', 'Oviedo', 'Gijon', 'Vigo', 'Santiago', 'A Coruna',
   'Tarragona', 'Lleida', 'Girona', 'Albacete', 'Cuenca', 'Ciudad Real',
+  // Portugal
+  'Lisboa', 'Porto', 'Coimbra', 'Braga', 'Faro', 'Setubal', 'Aveiro',
+  'Evora', 'Guimaraes', 'Viseu', 'Leiria', 'Santarem', 'Viana do Castelo',
+  'Vila Nova de Gaia', 'Funchal',
 ];
 
 function extractCity(name) {
@@ -452,6 +456,8 @@ function normalizeStationName(n) {
 function countryFromStopId(sid) {
   // ✅ Opérateurs espagnols — stop IDs courts (5 chiffres), pas de préfixe UIC
   if (sid.startsWith('RENFE:') || sid.startsWith('OUIGO_ES:')) return 'ES';
+  // ✅ CP Portugal — stop IDs préfixés 94_
+  if (sid.startsWith('CP:')) return 'PT';
 
   const m = sid.match(/(\d{7,9})$/);
   if (!m) return 'FR';
@@ -491,7 +497,7 @@ for (const [sid, stop] of Object.entries(stops)) {
   const name = stop.name || sid;
   const key  = normalizeStationName(name);
   if (!orphanGroups.has(key)) {
-    orphanGroups.set(key, { name, country: op === 'TI' ? 'IT' : countryFromStopId(sid),  // ✅ RENFE/OUIGO_ES → 'ES' via countryFromStopId
+    orphanGroups.set(key, { name, country: op === 'TI' ? 'IT' : op === 'CP' ? 'PT' : countryFromStopId(sid),  // ✅ RENFE/OUIGO_ES → 'ES', CP → 'PT'
       lat: stop.lat||0, lon: stop.lon||0, stopIds: [sid], operators: new Set([op]) });
   } else {
     const e = orphanGroups.get(key);
@@ -598,7 +604,8 @@ stations.sort((a, b) => {
     (s.operators.includes('ES')       ? 4 : 0) +
     (s.operators.includes('TI')       ? 2 : 0) +
     (s.operators.includes('RENFE')    ? 6 : 0) +
-    (s.operators.includes('OUIGO_ES') ? 5 : 0);
+    (s.operators.includes('OUIGO_ES') ? 5 : 0) +
+    (s.operators.includes('CP')       ? 5 : 0);
   if (score(b) !== score(a)) return score(b) - score(a);
   return a.name.localeCompare(b.name, 'fr');
 });
@@ -623,6 +630,9 @@ const CHECK = [
   'Madrid Pta.Atocha - Almudena Grandes', 'Madrid-Chamartin-Clara Campoamor',
   'Barcelona Sants', 'Valencia Joaquin Sorolla', 'Sevilla Santa Justa',
   'Zaragoza-Delicias', 'Malaga-Maria Zambrano',
+  // Portugal (CP)
+  'Lisboa Santa Apolonia', 'Lisboa Oriente', 'Porto Campanha', 'Porto Sao Bento',
+  'Coimbra B', 'Braga', 'Faro', 'Aveiro',
 ];
 for (const nom of CHECK) {
   const normName = str => str.toLowerCase().replace(/’/g, "'");

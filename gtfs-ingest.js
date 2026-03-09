@@ -6,10 +6,13 @@
  *   node gtfs-ingest.js ./operators.json ./engine_data
  *
  * Filtres appliqués par opérateur (trains longue distance uniquement) :
- *   SNCF  : exclut CAR, NAVETTE, TRAMTRAIN et route_type 3 (bus)
- *   SNCB  : garde uniquement IC, EC, NJ, OTC
- *   TI    : tout (déjà uniquement Frecciarossa)
- *   ES    : tout (Eurostar)
+ *   SNCF    : exclut CAR, NAVETTE, TRAMTRAIN et route_type 3 (bus)
+ *   SNCB    : garde uniquement IC, EC, NJ, OTC
+ *   TI      : tout (déjà uniquement Frecciarossa)
+ *   ES      : tout (Eurostar)
+ *   RENFE   : exclut PROXIMDAD, TRENCELTA, FEVE et bus
+ *   OUIGO_ES: tout sauf bus
+ *   CP      : garde uniquement AP (Alfa Pendular), IC (Intercidades), IR (Inter-regional)
  */
 
 const fs       = require('fs');
@@ -104,6 +107,15 @@ function shouldKeepRoute(operatorId, r) {
     case 'OUIGO_ES':
       // Tout garder pour OUIGO España
       return rtype !== 3;
+
+    case 'CP': {
+      // CP Portugal — garder uniquement longue distance
+      // AP = Alfa Pendular (grande vitesse), IC = Intercidades, IR = Inter-regional
+      // Exclure : Linha de... (banlieue), R (Regional), U (Urbain)
+      const s = (r.route_short_name || '').trim().toUpperCase();
+      const CP_KEEP = new Set(['AP', 'IC', 'IR']);
+      return CP_KEEP.has(s);
+    }
 
     default:
       // TI, ES, DB : garder tout le ferroviaire
@@ -223,6 +235,15 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
     case 'OUIGO_ES': {
       // OUIGO España — toujours un seul type
       return 'OUIGO_ES';
+    }
+
+    case 'CP': {
+      // CP Portugal — Alfa Pendular, Intercidades, Inter-regional
+      const rs = (routeShort || '').trim().toUpperCase();
+      if (rs === 'AP') return 'ALFA_PENDULAR';
+      if (rs === 'IC') return 'IC_CP';
+      if (rs === 'IR') return 'IR_CP';
+      return 'CP';
     }
 
     default:
@@ -601,10 +622,13 @@ async function main() {
 
   if (!fs.existsSync(OPS_FILE)) {
     const example = [
-      { "id": "SNCF",  "name": "SNCF",             "gtfs_dir": "./gtfs/sncf" },
-      { "id": "TI",    "name": "Trenitalia France", "gtfs_dir": "./gtfs/trenitalia" },
-      { "id": "ES",    "name": "Eurostar",          "gtfs_dir": "./gtfs/eurostar" },
-      { "id": "SNCB",  "name": "SNCB Belgique",     "gtfs_dir": "./gtfs/sncb" },
+      { "id": "SNCF",     "name": "SNCF",             "gtfs_dir": "./gtfs/sncf" },
+      { "id": "TI",       "name": "Trenitalia France", "gtfs_dir": "./gtfs/trenitalia" },
+      { "id": "ES",       "name": "Eurostar",          "gtfs_dir": "./gtfs/eurostar" },
+      { "id": "SNCB",     "name": "SNCB Belgique",     "gtfs_dir": "./gtfs/sncb" },
+      { "id": "RENFE",    "name": "Renfe Espagne",      "gtfs_dir": "./gtfs/renfe" },
+      { "id": "OUIGO_ES", "name": "OUIGO España",       "gtfs_dir": "./gtfs/ouigo_es" },
+      { "id": "CP",       "name": "CP Portugal",        "gtfs_dir": "./gtfs/cp" },
     ];
     fs.writeFileSync(OPS_FILE, JSON.stringify(example, null, 2));
     console.log(`\n⚠  operators.json créé. Editez-le puis relancez.`);

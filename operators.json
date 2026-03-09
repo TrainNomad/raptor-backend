@@ -37,5 +37,12 @@
     "gtfs_dir": "./gtfs/ouigo_es",
     "gtfs_nap_id": "1766",
     "note": "Telechargement via API NAP (cle requise) — voir script download_spain_gtfs.js"
+  },
+  {
+    "id": "CP",
+    "name": "CP Portugal (Alfa Pendular · Intercidades · Inter-regional)",
+    "gtfs_dir": "./gtfs/cp",
+    "gtfs_url": "https://publico.cp.pt/gtfs/gtfs.zip",
+    "note": "Feed officiel CP — couvre AP (Alfa Pendular, grande vitesse), IC (Intercidades) et IR (Inter-regional). URL directe publique, pas besoin de cle API. Mis a jour regulierement par CP."
   }
 ]
