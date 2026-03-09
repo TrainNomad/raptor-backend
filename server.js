@@ -15,7 +15,7 @@ const MAX_RESULTS = 8;
 
 const MIN_TRANSFER_SAME  = 3  * 60;  // 3 min  — même opérateur / même gare
 const MIN_TRANSFER_CROSS = 10 * 60;  // 10 min — inter-opérateurs (SNCF ↔ TI)
-const MIN_TRANSFER_CITY  = 45 * 60;  // 45 min — inter-gares même ville (métro)
+const MIN_TRANSFER_CITY  = 60 * 60;  // 60 min — inter-gares même ville (métro Paris, etc.)
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
 let stops, routesInfo, routesByStop, routeStops, routeTrips, calendarIndex, meta;
@@ -510,7 +510,8 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
         tau_best[sister] = t;
         marked.add(sister);
         parent[sister] = { from_stop:oid, trip_id:null, route_id:null,
-                           dep_time:startTime, arr_time:t, is_transfer:true };
+                           dep_time:startTime, arr_time:t, is_transfer:true,
+                           interCity: entry.interCity || false };
       }
       // Les sisters interCity (autre gare de la même ville) ne sont PAS des origines
       // par défaut (un trajet qui repart d'une gare interCity compte une correspondance).
@@ -545,7 +546,8 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
           tau_best[sister] = t;
           tau_cur[sister]  = t;
           parent[sister]   = { from_stop:sid, trip_id:null, route_id:null,
-                                dep_time:arr, arr_time:t, is_transfer:true };
+                                dep_time:arr, arr_time:t, is_transfer:true,
+                                interCity: entry.interCity || false };
           newMarked.add(sister);
         }
       }
@@ -665,8 +667,28 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     if (!p) return null;
 
     if (p.is_transfer) {
-      // Transfert inter-gares (interCity) en fin de trajet = inutile, on remonte
-      // jusqu'au vrai arrêt de train
+      if (p.interCity) {
+        // Correspondance inter-gares dans la même ville (ex: Montparnasse → Gare du Nord)
+        // On l'affiche comme un leg de transfert explicite pour que l'UI puisse le montrer.
+        legs.unshift({
+          from_id:    p.from_stop,
+          to_id:      current,
+          from_name:  resolveStopName(p.from_stop),
+          to_name:    resolveStopName(current),
+          dep_time:   p.dep_time,
+          arr_time:   p.arr_time,
+          dep_str:    secondsToHHMM(p.dep_time),
+          arr_str:    secondsToHHMM(p.arr_time),
+          trip_id:    null,
+          route_id:   null,
+          route_name: 'Correspondance',
+          operator:   'TRANSFER',
+          train_type: 'TRANSFER',
+          is_transfer: true,
+          duration:   Math.round((p.arr_time - p.dep_time) / 60),
+        });
+      }
+      // Quai-à-quai (is_transfer sans interCity) : silencieux, on remonte juste
       current = p.from_stop;
       continue;
     }
@@ -706,14 +728,16 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
   if (!legs.length) return null;
   const dep = legs[0].dep_time;
   const arr = legs[legs.length - 1].arr_time;
+  // On compte uniquement les vrais legs de train (pas les correspondances inter-gares)
+  const trainLegs = legs.filter(l => !l.is_transfer);
   return {
     dep_time:    dep,
     arr_time:    arr,
     dep_str:     secondsToHHMM(dep),
     arr_str:     secondsToHHMM(arr),
     duration:    Math.round((arr - dep) / 60),
-    transfers:   legs.length - 1,
-    train_types: [...new Set(legs.map(l => l.train_type).filter(Boolean))],
+    transfers:   trainLegs.length - 1,
+    train_types: [...new Set(trainLegs.map(l => l.train_type).filter(Boolean))],
     legs,
   };
 }
