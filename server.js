@@ -15,7 +15,7 @@ const MAX_RESULTS = 8;
 
 const MIN_TRANSFER_SAME  = 3  * 60;  // 3 min  — même opérateur / même gare
 const MIN_TRANSFER_CROSS = 10 * 60;  // 10 min — inter-opérateurs (SNCF ↔ TI)
-const MIN_TRANSFER_CITY  = 60 * 60;  // 60 min — inter-gares même ville (métro Paris, etc.)
+const MIN_TRANSFER_CITY  = 45 * 60;  // 45 min — inter-gares même ville (métro)
 
 // ─── Données en RAM ───────────────────────────────────────────────────────────
 let stops, routesInfo, routesByStop, routeStops, routeTrips, calendarIndex, meta;
@@ -364,7 +364,7 @@ function getFilteredData(dateISO) {
     if (valid.length) filteredTrips[rid] = valid;
   }
   const result = { stopToTrips: buildStopToTrips(filteredTrips) };
-  if (dateCache.size >= 7) dateCache.delete(dateCache.keys().next().value);
+  if (dateCache.size >= 2) dateCache.delete(dateCache.keys().next().value);
   dateCache.set(dateISO, result);
   return result;
 }
@@ -510,8 +510,7 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
         tau_best[sister] = t;
         marked.add(sister);
         parent[sister] = { from_stop:oid, trip_id:null, route_id:null,
-                           dep_time:startTime, arr_time:t, is_transfer:true,
-                           interCity: entry.interCity || false };
+                           dep_time:startTime, arr_time:t, is_transfer:true };
       }
       // Les sisters interCity (autre gare de la même ville) ne sont PAS des origines
       // par défaut (un trajet qui repart d'une gare interCity compte une correspondance).
@@ -546,8 +545,7 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
           tau_best[sister] = t;
           tau_cur[sister]  = t;
           parent[sister]   = { from_stop:sid, trip_id:null, route_id:null,
-                                dep_time:arr, arr_time:t, is_transfer:true,
-                                interCity: entry.interCity || false };
+                                dep_time:arr, arr_time:t, is_transfer:true };
           newMarked.add(sister);
         }
       }
@@ -585,7 +583,127 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
   return results;
 }
 
-// Retourne le nom de la station groupée contenant ce stopId — O(1)
+// ─── RAPTOR allégé pour /api/explore ─────────────────────────────────────────
+// Version mémoire-minimale : pas de parent[], pas de legs[], pas de reconstruct.
+// Retourne uniquement { stop_id, dep_time, arr_time, duration, transfers }.
+// Sur Render free (512 MB) : ~10× moins de mémoire que raptorCore en mode explore.
+
+function raptorExplore(originIds, startTime, stopToTripsData, dateISO, extraOrigins = null) {
+  // tau[sid] = earliest arrival in seconds
+  const tau      = {};
+  // dep[sid] = departure time from origin (pour calculer la durée totale)
+  const dep      = {};
+  // xfr[sid] = nombre de correspondances (trains, pas transfers quai)
+  const xfr      = {};
+  const originSet = new Set();
+  let   marked    = new Set();
+
+  for (const oid of originIds) {
+    tau[oid] = startTime;
+    dep[oid] = startTime;
+    xfr[oid] = 0;
+    marked.add(oid);
+    originSet.add(oid);
+
+    for (const entry of transferEntries(oid)) {
+      const sister = entry.id;
+      const t = startTime + transferTime(oid, entry);
+      if (t < (tau[sister] ?? Infinity)) {
+        tau[sister] = t;
+        dep[sister] = startTime;
+        xfr[sister] = 0;
+        marked.add(sister);
+      }
+      if (!entry.interCity || (extraOrigins && extraOrigins.has(sister))) originSet.add(sister);
+    }
+  }
+
+  const isTI = (sid) => (sid||'').startsWith('TI:');
+
+  for (let round = 1; round <= MAX_ROUNDS; round++) {
+    const tau_cur  = {};
+    const newMarked = new Set();
+
+    // ── Scan des trips ──
+    for (const stop of marked) {
+      for (const { routeId, trip, idx } of (stopToTripsData[stop] || [])) {
+        let boarded = false, boardDep = null, boardTau = null;
+        const tripIsTI = trip.operator === 'TI';
+
+        for (let i = idx; i < trip.stop_times.length; i++) {
+          const st  = trip.stop_times[i];
+          const sid = st.stop_id;
+
+          if (!boarded) {
+            const t = tau[sid];
+            if (t !== undefined) {
+              let rawDep = st.dep_time ?? st.arr_time;
+              if (rawDep == null) continue;
+              if (tripIsTI) rawDep = tiAdjust(rawDep, dateISO);
+              if (rawDep >= t) {
+                boarded  = true;
+                boardDep = rawDep;
+                boardTau = t;
+              }
+            }
+            continue;
+          }
+
+          let rawArr = st.arr_time ?? st.dep_time;
+          if (rawArr == null) continue;
+          if (tripIsTI) rawArr = tiAdjust(rawArr, dateISO);
+
+          if (rawArr < (tau[sid] ?? Infinity)) {
+            tau[sid]     = rawArr;
+            tau_cur[sid] = rawArr;
+            // Le dep_time de l'origine du voyage entier
+            dep[sid] = dep[stop] ?? startTime;
+            // Transferts = round - 1 (chaque round = 1 train supplémentaire)
+            xfr[sid] = round - 1;
+          }
+        }
+      }
+    }
+
+    // ── Propagation des transferts ──
+    for (const [sid, arr] of Object.entries(tau_cur)) {
+      if (arr < (tau[sid] ?? Infinity)) newMarked.add(sid);  // déjà mis à jour ci-dessus
+
+      for (const entry of transferEntries(sid)) {
+        const sister = entry.id;
+        const t = arr + transferTime(sid, entry);
+        if (t < (tau[sister] ?? Infinity)) {
+          tau[sister]     = t;
+          tau_cur[sister] = t;
+          dep[sister]     = dep[sid] ?? startTime;
+          xfr[sister]     = xfr[sid] ?? 0;
+          newMarked.add(sister);
+        }
+      }
+    }
+
+    marked = newMarked;
+    if (marked.size === 0) break;
+  }
+
+  // ── Résultats minimalistes (pas de legs) ──
+  const out = [];
+  for (const sid of Object.keys(tau)) {
+    if (originSet.has(sid)) continue;
+    const arrTime = tau[sid];
+    const depTime = dep[sid] ?? startTime;
+    out.push({
+      stop_id:   sid,
+      dep_time:  depTime,
+      arr_time:  arrTime,
+      dep_str:   secondsToHHMM(depTime),
+      arr_str:   secondsToHHMM(arrTime),
+      duration:  Math.round((arrTime - depTime) / 60),
+      transfers: xfr[sid] ?? 0,
+    });
+  }
+  return out;
+}
 function resolveStopName(stopId) {
   return stopStationMap.get(stopId) || cleanStopName(stopId);
 }
@@ -667,28 +785,8 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
     if (!p) return null;
 
     if (p.is_transfer) {
-      if (p.interCity) {
-        // Correspondance inter-gares dans la même ville (ex: Montparnasse → Gare du Nord)
-        // On l'affiche comme un leg de transfert explicite pour que l'UI puisse le montrer.
-        legs.unshift({
-          from_id:    p.from_stop,
-          to_id:      current,
-          from_name:  resolveStopName(p.from_stop),
-          to_name:    resolveStopName(current),
-          dep_time:   p.dep_time,
-          arr_time:   p.arr_time,
-          dep_str:    secondsToHHMM(p.dep_time),
-          arr_str:    secondsToHHMM(p.arr_time),
-          trip_id:    null,
-          route_id:   null,
-          route_name: 'Correspondance',
-          operator:   'TRANSFER',
-          train_type: 'TRANSFER',
-          is_transfer: true,
-          duration:   Math.round((p.arr_time - p.dep_time) / 60),
-        });
-      }
-      // Quai-à-quai (is_transfer sans interCity) : silencieux, on remonte juste
+      // Transfert inter-gares (interCity) en fin de trajet = inutile, on remonte
+      // jusqu'au vrai arrêt de train
       current = p.from_stop;
       continue;
     }
@@ -728,16 +826,14 @@ function reconstructJourney(parent, originSet, destId, dateISO) {
   if (!legs.length) return null;
   const dep = legs[0].dep_time;
   const arr = legs[legs.length - 1].arr_time;
-  // On compte uniquement les vrais legs de train (pas les correspondances inter-gares)
-  const trainLegs = legs.filter(l => !l.is_transfer);
   return {
     dep_time:    dep,
     arr_time:    arr,
     dep_str:     secondsToHHMM(dep),
     arr_str:     secondsToHHMM(arr),
     duration:    Math.round((arr - dep) / 60),
-    transfers:   trainLegs.length - 1,
-    train_types: [...new Set(trainLegs.map(l => l.train_type).filter(Boolean))],
+    transfers:   legs.length - 1,
+    train_types: [...new Set(legs.map(l => l.train_type).filter(Boolean))],
     legs,
   };
 }
@@ -918,50 +1014,44 @@ const server = http.createServer(async (req, res) => {
     console.log('\n[EXPLORE]', dateStr || 'sans date', '| from:', fromIds.slice(0,3).join(','));
 
     const { stopToTrips: stt } = getFilteredData(dateStr);
-    const fromCity   = q.fromCity === '1';
-    const uniqueFrom = resolveStopIds([...new Set(fromIds)], 'origin');
-    const originSet  = new Set(uniqueFrom);
+    const fromCity     = q.fromCity === '1';
+    const uniqueFrom   = resolveStopIds([...new Set(fromIds)], 'origin');
+    const originSet    = new Set(uniqueFrom);
     const extraOrigins = fromCity ? new Set(fromIds) : null;
 
-    // 3 slots couvrent matin/midi/soir — RAPTOR est idempotent sur les arrivées
-    // max-duration déjà capturées au round précédent. Gain ×2.5 vs 8 slots.
-    const slots = ['06:00', '11:00', '17:00'];
+    // Slot unique 07h00 — couvre la majorité des départs utiles.
+    // Render free = 512 MB : on évite les 3 passes raptorCore + reconstruct complet.
+    const startSec = timeToSeconds(q.time || '07:00');
+    const reached  = raptorExplore(uniqueFrom, startSec, stt, dateStr, extraOrigins);
+
+    // Enrichissement coordonnées GPS
     const bestByStop = {};
-
-    for (const timeStr of slots) {
-      const startSec = timeToSeconds(timeStr);
-      const reached  = raptorCore(uniqueFrom, null, startSec, stt, dateStr, extraOrigins);
-      for (const j of reached) {
-        const lastLeg = j.legs?.[j.legs.length - 1];
-        if (!lastLeg) continue;
-        const sid = lastLeg.to_id;
-        if (originSet.has(sid)) continue;
-        if (!bestByStop[sid] || j.duration < bestByStop[sid].duration) {
-          bestByStop[sid] = j;
-        }
+    for (const r of reached) {
+      const sid = r.stop_id;
+      if (originSet.has(sid)) continue;
+      if (!bestByStop[sid] || r.duration < bestByStop[sid].duration) {
+        bestByStop[sid] = r;
       }
-    }
-
-    // coordsByStopId : Map précompilée au démarrage (O(1)), pas reconstruite ici
-    const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();
-    const coordsByName = new Map();
-    for (const st of stopsIndex) {
-      if (st.lat && st.lon) coordsByName.set(norm(st.name), { lat: st.lat, lon: st.lon });
     }
 
     const journeys = [];
-    for (const [sid, j] of Object.entries(bestByStop)) {
-      const coords = globalCoordsMap.get(sid);
-      const lastLeg = j.legs?.[j.legs.length - 1];
-      const destName = lastLeg?.to_name || cleanStopName(sid);
-      const fallback = coordsByName.get(norm(destName));
-      const lat = coords?.lat || fallback?.lat || null;
-      const lon = coords?.lon || fallback?.lon || null;
-      if (lat && lon) {
-        j.dest_lat = lat;
-        j.dest_lon = lon;
-      }
-      journeys.push(j);
+    for (const [sid, r] of Object.entries(bestByStop)) {
+      const coords  = globalCoordsMap.get(sid);
+      const lat = coords?.lat || null;
+      const lon = coords?.lon || null;
+      if (!lat || !lon) continue;  // on ignore les stops sans coords (pas affichables)
+      journeys.push({
+        dep_time:  r.dep_time,
+        arr_time:  r.arr_time,
+        dep_str:   r.dep_str,
+        arr_str:   r.arr_str,
+        duration:  r.duration,
+        transfers: r.transfers,
+        dest_lat:  lat,
+        dest_lon:  lon,
+        // Nom de la destination pour l'UI
+        legs: [{ to_id: sid, to_name: cleanStopName(sid) }],
+      });
     }
 
     console.log(`  → ${journeys.length} destinations | ${Date.now()-t0}ms`);
