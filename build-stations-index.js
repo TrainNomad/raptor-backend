@@ -124,6 +124,38 @@ const ES_SLUG_COUNTRY = {
   'albertville':                 'FR',
 };
 
+// ── Ponts ibériques ES ↔ PT ───────────────────────────────────────────────────
+// Relie les stop_ids RENFE et CP qui désignent la même gare physique
+// (ou le point de correspondance frontalier le plus proche).
+//
+// Format : 'OPERATEUR:stop_id' → 'OPERATEUR:stop_id_jumeau'
+//
+// CORRIDOR NORD — Tren Celta (Vigo ↔ Porto)
+//   Renfe opère avec ses propres IDs dans les gares portugaises.
+//   GPS identiques → même quai physique.
+//   Renfe 22402  ↔  CP 94_7005   : Valença / Valença do Minho
+//   Renfe 94033  ↔  CP 94_18002  : Viana do Castelo
+//   Renfe 96122  ↔  CP 94_6122   : Barcelos
+//   Renfe 94021  ↔  CP 94_6007   : Nine
+//   Renfe 94346  ↔  CP 94_2006   : Porto Campanha
+//
+// CORRIDOR SUD — Lusitânia (Lisboa ↔ Madrid via Badajoz)
+//   Elvas (dernière gare CP) et Badajoz (première gare Renfe) sont à 13 km.
+//   Pont interCity : correspondance en bus/taxi ou attente sur place.
+//   CP 94_57497  ↔  RENFE 37606  : Elvas ↔ Badajoz  [interCity]
+//
+const IBERIAN_BRIDGES = [
+  // ── Tren Celta : gares partagées Renfe / CP (même quai) ──
+  { a: 'RENFE:22402',   b: 'CP:94_7005',   name: 'Valença',          interCity: false },
+  { a: 'RENFE:94033',   b: 'CP:94_18002',  name: 'Viana do Castelo', interCity: false },
+  { a: 'RENFE:96122',   b: 'CP:94_6122',   name: 'Barcelos',         interCity: false },
+  { a: 'RENFE:94021',   b: 'CP:94_6007',   name: 'Nine',             interCity: false },
+  { a: 'RENFE:94346',   b: 'CP:94_2006',   name: 'Porto Campanha',   interCity: false },
+
+  // ── Corridor Badajoz : correspondance frontalière Elvas ↔ Badajoz ──
+  { a: 'CP:94_57497',   b: 'RENFE:37606',  name: 'Elvas ↔ Badajoz', interCity: true  },
+];
+
 console.log('\n🔨 Construction stations.json depuis stations.csv...\n');
 
 if (!fs.existsSync(STOPS_FILE)) {
@@ -185,6 +217,62 @@ for (const sid of Object.keys(stops)) {
 
 console.log('  Index ES slug : ' + Object.keys(slugToEsStops).length + ' slugs Eurostar');
 console.log('  Slugs ES dispo: ' + Object.keys(slugToEsStops).sort().join(', ') + '\n');
+
+// ── Index CP stop_id → stop_ids (pour fusion avec RENFE) ─────────────────────
+// Les stop IDs CP ont la forme "CP:94_XXXX".
+// On construit un index rawId → [CP:94_XXXX] pour les gares frontières.
+const cpRawToStops = {};
+for (const sid of Object.keys(stops)) {
+  if (!sid.startsWith('CP:')) continue;
+  const raw = sid.slice(3); // "94_XXXX"
+  if (!cpRawToStops[raw]) cpRawToStops[raw] = [];
+  cpRawToStops[raw].push(sid);
+}
+console.log('  Index CP      : ' + Object.keys(cpRawToStops).length + ' stops CP\n');
+
+// ── Ponts ibériques manuels CP ↔ RENFE ───────────────────────────────────────
+// Résultat d'une analyse GPS exhaustive des GTFS CP et Renfe.
+// Chaque paire [stopA, stopB] force la fusion dans la même entrée stations.json.
+//
+// Corridors validés :
+//   NORD  : Vigo ↔ Porto (train Celta — Renfe circule sur infrastructure CP)
+//     - Valença/Valença do Minho    CP:94_7005  ↔ RENFE:22402    (28m)
+//     - Viana do Castelo            CP:94_18002 ↔ RENFE:94033    (6m)
+//     - Porto Campanha              CP:94_2006  ↔ RENFE:94346    (54m)
+//   CENTRE: Vilar Formoso (CP terminus, pas d'équivalent Renfe actif)
+//   SUD   : Elvas ↔ Badajoz  CP:94_57497 ↔ RENFE:37606  (14km — 2 villes distinctes)
+//           → lien interCity uniquement (correspondance bus ~15 min)
+//
+// Format : [stopId_A, stopId_B, type]
+//   "merge"     → même quai physique, fusionner dans une seule station
+//   "interCity" → villes différentes, lien de correspondance avec délai majoré
+// const IBERIAN_BRIDGES = [
+//   // Corridor Nord : Vigo ↔ Porto (Renfe utilise l'infra CP)
+//   ['CP:94_7005',  'RENFE:22402', 'merge'],     // Valença / Valença do Minho — 28m
+//   ['CP:94_18002', 'RENFE:94033', 'merge'],     // Viana do Castelo — 6m
+//   ['CP:94_2006',  'RENFE:94346', 'merge'],     // Porto Campanha — 54m
+
+//   // Corridor Sud : Elvas (PT) ↔ Badajoz (ES) — 2 villes, 14km
+//   // Correspondance interCity (bus ou taxi ~15 min de trajet + attente)
+//   ['CP:94_57497', 'RENFE:37606', 'interCity'], // Elvas ↔ Badajoz
+// ];
+
+// Index rapide stopId → [stopIds à fusionner avec lui]
+const iberianMergeIndex = {};   // pour type "merge"
+const iberianInterCity  = [];   // pour type "interCity"
+
+for (const [a, b, type] of IBERIAN_BRIDGES) {
+  if (!stops[a] || !stops[b]) continue; // l'un des deux n'est pas dans le GTFS chargé
+  if (type === 'merge') {
+    if (!iberianMergeIndex[a]) iberianMergeIndex[a] = [];
+    if (!iberianMergeIndex[b]) iberianMergeIndex[b] = [];
+    iberianMergeIndex[a].push(b);
+    iberianMergeIndex[b].push(a);
+  } else if (type === 'interCity') {
+    iberianInterCity.push([a, b]);
+  }
+}
+console.log('  Ponts ibériques : ' + Object.keys(iberianMergeIndex).length/2 + ' fusions, ' + iberianInterCity.length + ' liens interCity\n');
 
 // ── Blacklist des liens SNCF→ES erronés dans le transfer_index ────────────────
 // Format : 'uic8:es_slug_base' — ces liens existent dans transfer_index
@@ -331,6 +419,17 @@ for (const row of csvRows) {
       if (sister.startsWith('ES:')) continue;  // ES uniquement via whitelist
       allStopIds.add(sister);
       operators.add(extractOperator(sister));
+    }
+  }
+
+  // (6) Ponts ibériques CP ↔ RENFE (fusions "merge" uniquement)
+  // Force l'ajout des stops de l'opérateur partenaire pour les gares frontières
+  // où les deux réseaux partagent physiquement la même infrastructure.
+  for (const sid of [...allStopIds]) {
+    for (const partner of (iberianMergeIndex[sid] || [])) {
+      if (assignedStops.has(partner)) continue;
+      allStopIds.add(partner);
+      operators.add(extractOperator(partner));
     }
   }
 
@@ -510,7 +609,95 @@ for (const e of orphanGroups.values()) {
   stations.push({ ...e, city: extractCity(e.name), slug: '', operators: [...e.operators].sort(), sncf_id:null, ti_id:null, uic8:null });
 }
 
-// ── Post-processing : enrichissement ES depuis validEsTransfers ──────────────
+// ── Application des ponts ibériques dans stations.json ───────────────────────
+// Fusionne les stopIds RENFE et CP pour les gares partagées ou frontalières
+// définies dans IBERIAN_BRIDGES (déclaré plus haut dans ce fichier).
+//
+// • Ponts sans interCity (Tren Celta) : les deux stops sont ajoutés à la même
+//   station → l'algorithme RAPTOR les traite comme un seul quai.
+// • Pont interCity (Elvas ↔ Badajoz) : les deux stations restent distinctes mais
+//   le transfer_index de gtfs-ingest.js injecte un lien { id, interCity:true }
+//   pour que server.js applique un temps de correspondance majoré.
+{
+  // Reconstruire l'index stopId → indice station après tous les orphelins
+  const sidToIdx = new Map();
+  for (let i = 0; i < stations.length; i++) {
+    for (const sid of stations[i].stopIds) sidToIdx.set(sid, i);
+  }
+
+  let mergedCount = 0;
+  for (const bridge of IBERIAN_BRIDGES) {
+    const { a, b, interCity, name: bridgeName } = bridge;
+    const iA = sidToIdx.get(a);
+    const iB = sidToIdx.get(b);
+
+    if (iA === undefined && iB === undefined) {
+      console.warn(`  ⚠  Pont ibérique ignoré (aucun des deux stops trouvé) : ${a} ↔ ${b}`);
+      continue;
+    }
+
+    if (interCity) {
+      // Elvas ↔ Badajoz : gares séparées, correspondance inter-city
+      // Le lien sera injecté par gtfs-ingest.js dans le transfer_index.
+      // Ici on s'assure juste que les deux stations existent dans stations.json.
+      const stA = iA !== undefined ? stations[iA] : null;
+      const stB = iB !== undefined ? stations[iB] : null;
+      if (stA && stB) {
+        console.log(`  🌉 Pont interCity : ${stA.name} (PT) ↔ ${stB.name} (ES) — ${bridgeName}`);
+      } else {
+        console.warn(`  ⚠  Pont interCity incomplet : ${a}=${stA?.name} / ${b}=${stB?.name}`);
+      }
+    } else {
+      // Gares Tren Celta : fusion des stopIds dans la station dominante
+      // On garde la station qui a le plus d'opérateurs (ou A par défaut)
+      if (iA !== undefined && iB !== undefined && iA !== iB) {
+        // Fusionner B dans A
+        const stA = stations[iA];
+        const stB = stations[iB];
+        const allIds = new Set([...stA.stopIds, ...stB.stopIds]);
+        stA.stopIds = [...allIds];
+        for (const op of stB.operators) {
+          if (!stA.operators.includes(op)) stA.operators.push(op);
+        }
+        stA.operators.sort();
+        // Mettre à jour l'index pour tous les stopIds de B
+        for (const sid of stB.stopIds) sidToIdx.set(sid, iA);
+        // Marquer B comme supprimée
+        stations[iB] = null;
+        mergedCount++;
+        console.log(`  🔗 Fusion Tren Celta : ${stB.name} (${b}) → ${stA.name} (${a})`);
+      } else if (iA !== undefined && iB === undefined) {
+        // B n'a pas encore de station : créer un stop orphelin dans la station A
+        const stA = stations[iA];
+        if (!stA.stopIds.includes(b)) {
+          stA.stopIds.push(b);
+          const opB = b.split(':')[0];
+          if (!stA.operators.includes(opB)) { stA.operators.push(opB); stA.operators.sort(); }
+          sidToIdx.set(b, iA);
+          console.log(`  🔗 Stop ajouté : ${b} → station ${stA.name}`);
+        }
+      } else if (iA === undefined && iB !== undefined) {
+        // A n'a pas encore de station : créer un stop orphelin dans la station B
+        const stB = stations[iB];
+        if (!stB.stopIds.includes(a)) {
+          stB.stopIds.push(a);
+          const opA = a.split(':')[0];
+          if (!stB.operators.includes(opA)) { stB.operators.push(opA); stB.operators.sort(); }
+          sidToIdx.set(a, iB);
+          console.log(`  🔗 Stop ajouté : ${a} → station ${stB.name}`);
+        }
+      }
+    }
+  }
+
+  // Supprimer les entrées nulles (stations fusionnées)
+  const before = stations.length;
+  stations.splice(0, stations.length, ...stations.filter(Boolean));
+  if (mergedCount > 0) {
+    console.log(`  ✅ ${mergedCount} station(s) fusionnée(s) (Tren Celta) — ${before - stations.length} entrée(s) supprimée(s)`);
+  }
+}
+
 // Certaines gares créées via CSV ou orphelins SNCF ont un uic8 dans validEsTransfers
 // (ex: Bruxelles-Midi uic8=88140010) mais leurs stops ES ont été traités séparément.
 // On fusionne ici les deux entrées en ajoutant les stops ES à la gare SNCF
@@ -612,6 +799,40 @@ stations.sort((a, b) => {
 
 fs.writeFileSync(OUT_FILE, JSON.stringify(stations, null, 2), 'utf8');
 
+// ── Injection des ponts ibériques interCity dans transfer_index.json ──────────
+// Après finalisation de stations.json, on enrichit le transfer_index.json
+// avec les liens interCity Elvas↔Badajoz pour que server.js puisse calculer
+// les correspondances cross-border avec le bon délai (MIN_TRANSFER_CITY).
+if (global._iberianInterCityPairs && global._iberianInterCityPairs.length > 0) {
+  const xferPath = path.join(DATA_DIR, 'transfer_index.json');
+  if (fs.existsSync(xferPath)) {
+    const xferData = JSON.parse(fs.readFileSync(xferPath, 'utf8'));
+    let injected = 0;
+    for (const [idsA, idsB] of global._iberianInterCityPairs) {
+      for (const idA of idsA) {
+        if (!xferData[idA]) xferData[idA] = [];
+        for (const idB of idsB) {
+          if (!xferData[idA].some(x => (x.id || x) === idB)) {
+            xferData[idA].push({ id: idB, interCity: true });
+            injected++;
+          }
+        }
+      }
+      for (const idB of idsB) {
+        if (!xferData[idB]) xferData[idB] = [];
+        for (const idA of idsA) {
+          if (!xferData[idB].some(x => (x.id || x) === idA)) {
+            xferData[idB].push({ id: idA, interCity: true });
+            injected++;
+          }
+        }
+      }
+    }
+    fs.writeFileSync(xferPath, JSON.stringify(xferData));
+    console.log(`  🌉 ${injected} liens interCity ibériques injectés dans transfer_index.json`);
+  }
+}
+
 const sizeKb = Math.round(fs.statSync(OUT_FILE).size / 1024);
 console.log('✅ stations.json : ' + stations.length + ' gares — ' + sizeKb + ' KB');
 console.log('  Fusions TI réussies  : ' + nbFusionsTI);
@@ -633,6 +854,8 @@ const CHECK = [
   // Portugal (CP)
   'Lisboa Santa Apolonia', 'Lisboa Oriente', 'Porto Campanha', 'Porto Sao Bento',
   'Coimbra B', 'Braga', 'Faro', 'Aveiro',
+  // Gares frontières ES↔PT
+  'Valença', 'Viana do Castelo', 'Elvas', 'Badajoz', 'Vilar Formoso',
 ];
 for (const nom of CHECK) {
   const normName = str => str.toLowerCase().replace(/’/g, "'");

@@ -380,6 +380,35 @@ function buildTransferIndex(stopsDict) {
     console.log(`  🏙  ${cityLinks} liens inter-gares (même ville, gares différentes)`);
   }
 
+  // 4. Ponts ibériques ES ↔ PT : liaisons manuelles Renfe ↔ CP
+  //    Couvre le Tren Celta (Vigo ↔ Porto) et le corridor Badajoz (Lisboa ↔ Madrid).
+  //    Source : analyse GPS + routes GTFS croisées (voir IBERIAN_BRIDGES dans build-stations-index.js)
+  {
+    const IBERIAN_BRIDGES = [
+      // Tren Celta — gares physiquement identiques (GPS < 5m)
+      { a: 'RENFE:22402',   b: 'CP:94_7005',   interCity: false }, // Valença
+      { a: 'RENFE:94033',   b: 'CP:94_18002',  interCity: false }, // Viana do Castelo
+      { a: 'RENFE:96122',   b: 'CP:94_6122',   interCity: false }, // Barcelos
+      { a: 'RENFE:94021',   b: 'CP:94_6007',   interCity: false }, // Nine
+      { a: 'RENFE:94346',   b: 'CP:94_2006',   interCity: false }, // Porto Campanha
+      // Corridor Badajoz — correspondance frontalière Elvas ↔ Badajoz (13 km)
+      { a: 'CP:94_57497',   b: 'RENFE:37606',  interCity: true  }, // Elvas ↔ Badajoz
+    ];
+
+    let iberianLinks = 0;
+    for (const bridge of IBERIAN_BRIDGES) {
+      const { a, b, interCity } = bridge;
+      if (!stopsDict[a] || !stopsDict[b]) continue;
+      if (!transferIndex[a]) transferIndex[a] = [];
+      if (!transferIndex[b]) transferIndex[b] = [];
+      const linkAB = interCity ? { id: b, interCity: true } : b;
+      const linkBA = interCity ? { id: a, interCity: true } : a;
+      if (!transferIndex[a].some(x => (x.id || x) === b)) { transferIndex[a].push(linkAB); iberianLinks++; }
+      if (!transferIndex[b].some(x => (x.id || x) === a)) { transferIndex[b].push(linkBA); iberianLinks++; }
+    }
+    console.log(`  🇵🇹🇪🇸 ${iberianLinks} ponts ibériques Renfe ↔ CP (Tren Celta + Badajoz)`);
+  }
+
   console.log(`  Total : ${Object.keys(transferIndex).length} arrêts avec correspondances`);
   return transferIndex;
 }
