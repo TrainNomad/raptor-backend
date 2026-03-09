@@ -777,49 +777,77 @@ stations.sort((a, b) => {
 
 fs.writeFileSync(OUT_FILE, JSON.stringify(stations, null, 2), 'utf8');
 
-// ── Injection des ponts ibériques interCity dans transfer_index.json ──────────
-// Après finalisation de stations.json, on enrichit le transfer_index.json
-// avec les liens interCity Elvas↔Badajoz pour que server.js puisse calculer
-// les correspondances cross-border avec le bon délai (MIN_TRANSFER_CITY).
-if (iberianInterCity.length > 0) {
+// ── Injection des liens inter-gares dans transfer_index.json ─────────────────
+// Fait ici (et non dans gtfs-ingest.js) car stations.json vient d'être généré
+// → on est sûrs d'avoir les champs city/country corrects pour toutes les gares.
+// Injecte deux types de liens { id, interCity: true } :
+//   A) Villes multi-gares  — ex: Paris (Montparnasse ↔ Nord ↔ Lyon ↔ Est ↔ …)
+//   B) Ponts ibériques interCity — Elvas ↔ Badajoz
+{
   const xferPath = path.join(DATA_DIR, 'transfer_index.json');
-  if (fs.existsSync(xferPath)) {
+  if (!fs.existsSync(xferPath)) {
+    console.warn('  ⚠  transfer_index.json introuvable — liens inter-gares non injectés');
+  } else {
     const xferData = JSON.parse(fs.readFileSync(xferPath, 'utf8'));
 
-    // Récupérer tous les stopIds de chaque station concernée
-    const sidToIdx = new Map();
-    for (let i = 0; i < stations.length; i++)
-      for (const sid of stations[i].stopIds) sidToIdx.set(sid, i);
+    // Index stopId → station
+    const sidToSt = new Map();
+    for (const st of stations) for (const sid of st.stopIds) sidToSt.set(sid, st);
 
-    let injected = 0;
-    for (const [stopA, stopB] of iberianInterCity) {
-      const stA = stations[sidToIdx.get(stopA)];
-      const stB = stations[sidToIdx.get(stopB)];
-      if (!stA || !stB) {
-        console.warn(`  ⚠  Pont interCity transfer_index ignoré : ${stopA} ou ${stopB} introuvable`);
-        continue;
-      }
-      for (const idA of stA.stopIds) {
-        if (!xferData[idA]) xferData[idA] = [];
-        for (const idB of stB.stopIds) {
-          if (!xferData[idA].some(x => (x.id || x) === idB)) {
-            xferData[idA].push({ id: idB, interCity: true });
-            injected++;
-          }
-        }
-      }
-      for (const idB of stB.stopIds) {
-        if (!xferData[idB]) xferData[idB] = [];
-        for (const idA of stA.stopIds) {
-          if (!xferData[idB].some(x => (x.id || x) === idA)) {
-            xferData[idB].push({ id: idA, interCity: true });
-            injected++;
+    // Regrouper les stations par ville + pays
+    const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const cityGroups = new Map();
+    for (const st of stations) {
+      const city    = st.city || st.name;
+      const country = st.country || 'FR';
+      const key     = norm(city) + ':' + country;
+      if (!cityGroups.has(key)) cityGroups.set(key, []);
+      cityGroups.get(key).push(st);
+    }
+
+    // Helper : injecter un lien interCity dans les deux sens
+    function injectLink(xfer, idA, idB) {
+      if (!xfer[idA]) xfer[idA] = [];
+      if (!xfer[idB]) xfer[idB] = [];
+      if (!xfer[idA].some(x => (x.id || x) === idB)) xfer[idA].push({ id: idB, interCity: true });
+      if (!xfer[idB].some(x => (x.id || x) === idA)) xfer[idB].push({ id: idA, interCity: true });
+    }
+
+    let cityLinks = 0;
+    // A) Toutes les villes multi-gares
+    for (const [, group] of cityGroups) {
+      if (group.length < 2) continue;
+      for (let gi = 0; gi < group.length; gi++) {
+        for (let gj = gi + 1; gj < group.length; gj++) {
+          for (const idA of group[gi].stopIds) {
+            for (const idB of group[gj].stopIds) {
+              injectLink(xferData, idA, idB);
+              cityLinks++;
+            }
           }
         }
       }
     }
+    console.log(`  🏙  ${cityLinks} liens inter-gares ville injectés (Paris, Lyon, Madrid…)`);
+
+    // B) Ponts ibériques interCity (Elvas ↔ Badajoz)
+    let iberianLinks = 0;
+    for (const [stopA, stopB] of iberianInterCity) {
+      const stA = sidToSt.get(stopA);
+      const stB = sidToSt.get(stopB);
+      if (!stA || !stB) {
+        console.warn(`  ⚠  Pont interCity ignoré : ${stopA} ou ${stopB} introuvable`);
+        continue;
+      }
+      for (const idA of stA.stopIds) for (const idB of stB.stopIds) {
+        injectLink(xferData, idA, idB);
+        iberianLinks++;
+      }
+    }
+    if (iberianLinks > 0) console.log(`  🌉 ${iberianLinks} liens interCity ibériques injectés`);
+
     fs.writeFileSync(xferPath, JSON.stringify(xferData));
-    console.log(`  🌉 ${injected} liens interCity ibériques injectés dans transfer_index.json`);
+    console.log(`  ✅ transfer_index.json mis à jour (${Object.keys(xferData).length} arrêts)`);
   }
 }
 
