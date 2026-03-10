@@ -44,5 +44,11 @@
     "gtfs_dir": "./gtfs/cp",
     "gtfs_url": "https://publico.cp.pt/gtfs/gtfs.zip",
     "note": "Feed officiel CP — couvre AP (Alfa Pendular, grande vitesse), IC (Intercidades) et IR (Inter-regional). URL directe publique, pas besoin de cle API. Mis a jour regulierement par CP."
+  },
+  {
+    "id": "UK",
+    "name": "UK Long Distance Rail (Avanti West Coast · Caledonian Sleeper)",
+    "gtfs_dir": "./gtfs/uk_ld",
+    "note": "Filtre depuis GTFS UK National (transitland). Agences conservees : VT (Avanti West Coast), CS (Caledonian Sleeper). Mis a jour automatiquement chaque lundi via GitHub Actions."
   }
 ]

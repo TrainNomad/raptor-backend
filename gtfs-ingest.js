@@ -118,6 +118,11 @@ function shouldKeepRoute(operatorId, r) {
       return CP_KEEP.has(s);
     }
 
+    case 'UK':
+      // Déjà filtré par le workflow GitHub Actions (agences VT + CS uniquement)
+      // route_type 2 = rail standard, 100-199 = rail étendu (UK utilise 100-106)
+      return rtype === 2 || (rtype >= 100 && rtype <= 199);
+
     default:
       // TI, ES, DB : garder tout le ferroviaire
       return rtype !== 3;
@@ -245,6 +250,19 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
       if (rs === 'IC') return 'IC_CP';
       if (rs === 'IR') return 'IR_CP';
       return 'CP';
+    }
+
+    case 'UK': {
+      // VT = Avanti West Coast, CS = Caledonian Sleeper
+      // Le trip_id UK commence souvent par le code agence (ex: VT12345, CS98765)
+      const prefix = (tripId || '').substring(0, 2).toUpperCase();
+      if (prefix === 'VT') return 'AVANTI';
+      if (prefix === 'CS') return 'CALEDONIAN_SLEEPER';
+      // Fallback sur route_short_name si le trip_id ne commence pas par le code
+      const rs = (routeShort || '').toLowerCase();
+      if (rs.includes('avanti') || rs.includes('west coast')) return 'AVANTI';
+      if (rs.includes('caledonian') || rs.includes('sleeper'))  return 'CALEDONIAN_SLEEPER';
+      return 'UK_RAIL';
     }
 
     default:
