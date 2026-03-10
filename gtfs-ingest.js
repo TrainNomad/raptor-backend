@@ -110,12 +110,15 @@ function shouldKeepRoute(operatorId, r) {
       return rtype !== 3;
 
     case 'CP': {
-      // CP Portugal — garder uniquement longue distance
-      // AP = Alfa Pendular (grande vitesse), IC = Intercidades, IR = Inter-regional
-      // Exclure : Linha de... (banlieue), R (Regional), U (Urbain)
+      // CP Portugal — exclure uniquement les lignes urbaines/banlieue
+      // U = Urbain (métro léger, trams), R = Regional très local
+      // On garde AP, IC, IR, MAIS AUSSI toutes les lignes ferroviaires non-urbaines
+      // car la ligne Lisboa→Badajoz (stop Elvas CP:94_57497) peut avoir un autre code
       const s = (r.route_short_name || '').trim().toUpperCase();
-      const CP_KEEP = new Set(['AP', 'IC', 'IR']);
-      return CP_KEEP.has(s);
+      const CP_URBAN_EXCLUDE = new Set(['U']); // Uniquement les services purement urbains
+      if (CP_URBAN_EXCLUDE.has(s)) return false;
+      // Exclure les bus (type 3) mais garder tout le ferroviaire
+      return rtype !== 3;
     }
 
     case 'UK':

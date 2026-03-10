@@ -57,6 +57,10 @@ const CITY_PREFIXES = [
   'Koln', 'Dusseldorf', 'Dortmund', 'Duisburg', 'Essen', 'Aachen', 'Frankfurt',
   // UK
   'London', 'Londres',
+  'Manchester', 'Birmingham', 'Edinburgh', 'Glasgow', 'Leeds', 'Newcastle',
+  'Bristol', 'Cardiff', 'Liverpool', 'Sheffield', 'Nottingham', 'Leicester',
+  'Reading', 'Bath', 'York', 'Preston', 'Carlisle', 'Inverness', 'Aberdeen',
+  'Crewe', 'Coventry', 'Milton Keynes', 'Peterborough', 'Cambridge', 'Oxford',
   // Espagne — villes multi-gares
   'Madrid', 'Barcelona', 'Valencia', 'Sevilla', 'Zaragoza', 'Bilbao',
   'Malaga', 'Alicante', 'Cordoba', 'Valladolid', 'San Sebastian',
@@ -94,12 +98,11 @@ function extractCity(name) {
 //   node build-stations-index.js puis chercher dans le diagnostic.
 const CSV_SLUG_TO_ES_SLUG = {
   'paris-gare-du-nord':          'paris_nord',
-  // Si votre GTFS ES contient 'paris_est', décommentez :
-  // 'paris-gare-de-lest':       'paris_est',
   'london-st-pancras':           'st_pancras_international',
   'st-pancras-international':    'st_pancras_international',
-  // Ajouter d'autres cas si besoin
-  // Note: bruxelles-midi, lille-europe, etc. sont gérés via la whitelist transfer_index
+  // Bruxelles Midi a un slug CSV différent du slug ES
+  'bruxelles-midi':              'bruxelles_midi',
+  'brussel-zuid':                'bruxelles_midi',
 };
 
 // ── Pays des gares ES-only (non couvertes par le CSV is_suggestable) ──────────
@@ -535,6 +538,8 @@ function countryFromStopId(sid) {
   if (sid.startsWith('RENFE:') || sid.startsWith('OUIGO_ES:')) return 'ES';
   // ✅ CP Portugal — stop IDs préfixés 94_
   if (sid.startsWith('CP:')) return 'PT';
+  // ✅ UK Rail longue distance
+  if (sid.startsWith('UK:')) return 'GB';
 
   const m = sid.match(/(\d{7,9})$/);
   if (!m) return 'FR';
@@ -858,37 +863,59 @@ console.log('  Gares ES créées      : ' + esOnlyAdded.join(', '));
 console.log('  Stops orphelins SNCF : ' + [...orphanGroups.values()].reduce((s,e)=>s+e.stopIds.length,0));
 
 // ── Diagnostic ────────────────────────────────────────────────────────────────
-console.log('\n── Diagnostic gares clés ─────────────────────────────────────────');
+// Index stopId → station pour lookup O(1)
+const _sidToSt = new Map();
+for (const st of stations) for (const sid of st.stopIds) _sidToSt.set(sid, st);
+
 const CHECK = [
-  'Paris Gare de Lyon', 'Paris Gare du Nord', "Paris Gare de l'Est",
-  'Lyon Part-Dieu', 'Marseille St-Charles',
-  'Milano Centrale', 'Milano Porta Garibaldi',
-  'Torino Porta Susa', 'Torino Porta Nuova', 'Ventimiglia',
-  'Amsterdam-Centraal', 'Bruxelles Midi', 'St-Pancras-International',
-  // Espagne
-  'Madrid Pta.Atocha - Almudena Grandes', 'Madrid-Chamartin-Clara Campoamor',
-  'Barcelona Sants', 'Valencia Joaquin Sorolla', 'Sevilla Santa Justa',
-  'Zaragoza-Delicias', 'Malaga-Maria Zambrano',
-  // Portugal (CP)
-  'Lisboa Santa Apolonia', 'Lisboa Oriente', 'Porto Campanha', 'Porto Sao Bento',
-  'Coimbra B', 'Braga', 'Faro', 'Aveiro',
-  // Gares frontières ES↔PT
-  'Valença', 'Viana do Castelo', 'Elvas', 'Badajoz', 'Vilar Formoso',
+  { name: 'Paris Gare de Lyon',        slug: 'paris-gare-de-lyon' },
+  { name: 'Paris Gare du Nord',        slug: 'paris-gare-du-nord' },
+  { name: "Paris Gare de l'Est",       slug: 'paris-gare-de-lest' },
+  { name: 'Lyon Part-Dieu',            slug: 'lyon-part-dieu' },
+  { name: 'Marseille St-Charles',      slug: 'marseille-saint-charles' },
+  { name: 'Milano Centrale' },
+  { name: 'Torino Porta Susa' },
+  { name: 'Amsterdam-Centraal',        slug: 'amsterdam-centraal',      warnNoES: true },
+  { name: 'Bruxelles Midi',            stopId: 'ES:bruxelles_midi',     warnNoES: true },
+  { name: 'St-Pancras-International',  slug: 'st-pancras-international' },
+  // Espagne — lookup par stop_id Renfe
+  { name: 'Madrid Atocha',             stopId: 'RENFE:60000' },
+  { name: 'Madrid Chamartin',          stopId: 'RENFE:17000' },
+  { name: 'Barcelona Sants',           stopId: 'RENFE:71801' },
+  { name: 'Valencia Joaquin Sorolla',  stopId: 'RENFE:03216' },
+  { name: 'Sevilla Santa Justa',       stopId: 'RENFE:51003' },
+  { name: 'Zaragoza Delicias',         stopId: 'RENFE:04040' },
+  { name: 'Malaga Maria Zambrano',     stopId: 'RENFE:60501' },
+  // Portugal / Frontières
+  { name: 'Lisboa Santa Apolonia',     stopId: 'CP:94_30007' },
+  { name: 'Lisboa Oriente',            stopId: 'CP:94_31039' },
+  { name: 'Porto Campanha',            stopId: 'CP:94_2006'  },
+  { name: 'Elvas',                     stopId: 'CP:94_57497' },
+  { name: 'Badajoz',                   stopId: 'RENFE:37606' },
+  { name: 'Valença (CP)',              stopId: 'CP:94_7005'  },
+  { name: 'Valença do Minho (RENFE)',  stopId: 'RENFE:22402' },
+  { name: 'Viana do Castelo',          stopId: 'CP:94_18002' },
 ];
-for (const nom of CHECK) {
-  const normName = str => str.toLowerCase().replace(/’/g, "'");
-  const f = stations.find(s => normName(s.name) === normName(nom));
+
+console.log('\n── Diagnostic gares clés ─────────────────────────────────────────');
+for (const entry of CHECK) {
+  const nom = entry.name;
+  let f = null;
+  if (entry.stopId)    f = _sidToSt.get(entry.stopId);
+  if (!f && entry.slug) f = stations.find(s => s.slug === entry.slug);
+  if (!f) {
+    const norm = s => (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    f = stations.find(s => norm(s.name) === norm(nom));
+  }
   if (f) {
     const es   = f.stopIds.filter(id => id.startsWith('ES:'));
-    const ti   = f.stopIds.filter(id => id.startsWith('TI:'));
-    const sncf = f.stopIds.filter(id => !id.startsWith('ES:') && !id.startsWith('TI:'));
-    const warn = (!es.length && ['Amsterdam-Centraal','Bruxelles Midi','St-Pancras-International','Paris Gare du Nord'].includes(nom))
-      ? ' ⚠ pas de stop ES' : '';
-    console.log(`  ✅ ${nom.padEnd(30)} ${f.stopIds.length} stops [${f.operators.join('+')}]${warn}`);
-    if (es.length)   console.log(`       ES  : ${es[0]}${es.length > 1 ? ` … +${es.length-1}` : ''}`);
-    if (sncf.length) console.log(`       SNCF: ${sncf[0]}${sncf.length > 1 ? ` … +${sncf.length-1}` : ''}`);
+    const rest = f.stopIds.filter(id => !id.startsWith('ES:'));
+    const warnNoES = entry.warnNoES && !es.length ? ' ⚠ pas de stop ES' : '';
+    console.log(`  ✅ ${nom.padEnd(28)} ${f.stopIds.length} stops [${f.operators.join('+')}]${warnNoES}`);
+    if (es.length)   console.log(`       ES  : ${es[0]}${es.length>1?` … +${es.length-1}`:''}`);
+    if (rest.length) console.log(`       stop: ${rest[0]}${rest.length>1?` … +${rest.length-1}`:''}`);
   } else {
-    console.log(`  ❌ ${nom} — introuvable dans stations.json`);
+    console.log(`  ❌ ${nom}${entry.stopId ? ' (' + entry.stopId + ' absent)' : ''}`);
   }
 }
 console.log('\n→ Relancez : node server.js');
