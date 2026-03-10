@@ -47,8 +47,9 @@
   },
   {
     "id": "UK",
-    "name": "UK Long Distance Rail (Avanti West Coast · Caledonian Sleeper)",
+    "name": "UK Long Distance Rail (Avanti · Caledonian)",
     "gtfs_dir": "./gtfs/uk_ld",
-    "note": "Filtre depuis GTFS UK National (transitland). Agences conservees : VT (Avanti West Coast), CS (Caledonian Sleeper). Mis a jour automatiquement chaque lundi via GitHub Actions."
+    "gtfs_url": "https://api.transit.land/api/v2/rest/feeds/f-gc-rail~nationalrail/download?api_key=iSQvk8H4v8dTBm5rACmwsV6gLqks8laM&operators=o-gc-avantiwestcoast,o-gc-caledoniansleeper",
+    "note": "Flux GTFS filtré via Transitland. Contient uniquement Avanti West Coast et Caledonian Sleeper."
   }
 ]
