@@ -49,7 +49,11 @@
     "id": "UK",
     "name": "UK Long Distance Rail (Avanti · Caledonian)",
     "gtfs_dir": "./gtfs/uk_ld",
-    "gtfs_url": "https://api.transit.land/api/v2/rest/feeds/o-gc-avantiwestcoast/download?api_key=iSQvk8H4v8dTBm5rACmwsV6gLqks8laM",
-    "note": "Flux National Rail complet via Transitland. Si le build est trop lourd, il faudra filtrer les agences VT et CS dans le script de build."
+    "gtfs_source_url": "http://gtfs-source-feeds.transit.land/uk-rail.zip",
+    "gtfs_filter_agencies": [
+      "VT",
+      "CS"
+    ],
+    "note": "ZIP UK complet téléchargé au build, filtré en Python inline (VT=Avanti, CS=Caledonian Sleeper). Pas de GitHub Actions nécessaire."
   }
 ]
