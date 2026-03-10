@@ -47,8 +47,7 @@
   },
   {
   "id": "UK",
-  "gtfs_dir": "./gtfs/uk_ld",
-  "gtfs_source_url": "http://gtfs-source-feeds.transit.land/uk-rail.zip",
-  "gtfs_filter_agencies": ["VT", "CS"]
+  "name": "Avanti West Coast",
+  "gtfs_dir": "./gtfs/Avanti_Only"
 }
 ]
