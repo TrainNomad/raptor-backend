@@ -71,6 +71,8 @@ function downloadNAP(op) {
         downloadDirect(op);
       } else if (op.gtfs_nap_id) {
         await downloadNAP(op);
+      } else if (op.gtfs_dir && fs.existsSync(op.gtfs_dir) && fs.readdirSync(op.gtfs_dir).length > 0) {
+        console.log('  OK ' + op.id + ' : dossier pré-existant (' + op.gtfs_dir + ')');
       } else {
         console.log('  SKIP ' + op.id + ' : aucune source configuree.');
       }

@@ -395,7 +395,9 @@ for (const row of csvRows) {
   // Les ES: sont gérés exclusivement via les étapes (4) et (4b) pour éviter
   // les faux liens par proximité GPS (ex: Est → paris_nord).
   for (const sid of [...allStopIds]) {
-    for (const sister of (xfer[sid] || [])) {
+    for (const raw of (xfer[sid] || [])) {
+      const sister = raw?.id || raw;  // compatibilité string ET objet {id, interCity}
+      if (typeof sister !== 'string') continue;
       if (assignedStops.has(sister)) continue;
       if (sister.startsWith('ES:')) continue;  // ES uniquement via whitelist
       allStopIds.add(sister);
@@ -565,7 +567,7 @@ for (const [sid, stop] of Object.entries(stops)) {
   // Si ce StopPoint a un StopArea parent déjà assigné à une gare,
   // l'absorber dans cette gare plutôt que d'en créer une orpheline
   // (ex: SNCF:StopPoint:OCETGV INOUI-88140010 → parent OCE88140010 → Bruxelles-Midi)
-  const parentArea = (xfer[sid] || []).find(v => v.startsWith('SNCF:StopArea:'));
+  const parentArea = (xfer[sid] || []).map(v => v?.id || v).find(v => typeof v === 'string' && v.startsWith('SNCF:StopArea:'));
   if (parentArea && stopIdToStation.has(parentArea)) {
     const parentStation = stations[stopIdToStation.get(parentArea)];
     if (!parentStation.stopIds.includes(sid)) {
