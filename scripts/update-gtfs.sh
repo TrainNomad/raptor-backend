@@ -1,116 +1,129 @@
 #!/bin/bash
 set -e
 
-# --- PARTIE 1 : Téléchargement et Filtrage spécifique UK (Avanti) ---
-echo "📥 Téléchargement spécifique : UK Rail (Avanti)..."
-API_KEY="iSQvk8H4v8dTBm5rACmwsV6gLqks8laM"
-UK_URL="https://transit.land/api/v2/rest/feeds/f-uk~rail/download_latest_feed_version?apikey=$API_KEY"
+# =============================================================================
+#  update-gtfs.sh
+#  Télécharge, dézippe et filtre tous les GTFS, puis lance l'ingestion.
+#
+#  Dépendances (même dossier) :
+#    filter_avanti.js        — filtre les données UK Rail → Avanti Only
+#    gtfs-ingest.js          — ingestion RAPTOR multi-opérateurs
+#    build-stations-index.js — index des stations
+#    operators.json          — liste des opérateurs
+# =============================================================================
 
-# On crée les dossiers nécessaires
+TRANSITLAND_API_KEY="${TRANSITLAND_API_KEY:-iSQvk8H4v8dTBm5rACmwsV6gLqks8laM}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 1 — UK Rail (transit.land) + filtrage Avanti
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement UK Rail (transit.land)..."
+
 mkdir -p ./gtfs/UK_Rail
 mkdir -p ./gtfs/Avanti_Only
 
-# Téléchargement du gros fichier UK avec options pour Windows/Render
-curl -k -L "$UK_URL" -o /tmp/gtfs_uk_full.zip
+curl -k -L \
+  "https://transit.land/api/v2/rest/feeds/f-uk~rail/download_latest_feed_version?apikey=${TRANSITLAND_API_KEY}" \
+  -o /tmp/gtfs_uk_full.zip
+
 unzip -o /tmp/gtfs_uk_full.zip -d ./gtfs/UK_Rail > /dev/null
 
-echo "⚙️ Filtrage Avanti (VT)..."
-# Recherche automatique du script Python (plus robuste sur Render)
-PYTHON_SCRIPT=$(find . -name "filter_avanti.py" | head -n 1)
+echo "⚙️  Filtrage Avanti West Coast (VT)..."
+node filter_avanti.js
 
-if [ -z "$PYTHON_SCRIPT" ]; then
-    echo "❌ Erreur : filter_avanti.py introuvable !"
-    exit 1
-fi
-
-python3 "$PYTHON_SCRIPT"
-
-# --- PARTIE 2 : Logique Node.js d'origine pour les autres pays ---
-echo "📥 Téléchargement des autres GTFS (SNCF, Eurostar, Renfe, etc.)..."
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 2 — Autres opérateurs (SNCF, Eurostar, Renfe…) via Node
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement des autres GTFS..."
 
 node << 'ENDNODE'
-const https   = require('https');
-const fs      = require('fs');
-const path    = require('path');
+const https        = require('https');
+const fs           = require('fs');
 const { execSync } = require('child_process');
 
 const ops         = require('./operators.json');
-const NAP_API_KEY = '5c51e865-2f81-4215-a1f0-3b73985a31fa';
+const NAP_API_KEY = process.env.NAP_API_KEY || '5c51e865-2f81-4215-a1f0-3b73985a31fa';
 
-/**
- * Téléchargement Direct (SNCF, Eurostar, Trenitalia...)
- */
+// ─── Téléchargement via URL directe (curl) ────────────────────────────────────
 function downloadDirect(op) {
   const dir = op.gtfs_dir;
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
   const tmp = '/tmp/gtfs_' + op.id + '.zip';
   console.log('  -> ' + op.id + ' (direct) : ' + op.gtfs_url);
-  try {
-    execSync('curl -L -s -o ' + tmp + ' "' + op.gtfs_url + '"');
-    execSync('unzip -o ' + tmp + ' -d ' + dir + ' > /dev/null');
-    console.log('  OK ' + op.id + ' extrait dans ' + dir);
-  } catch (e) {
-    console.error('  ❌ Erreur sur ' + op.id + ': ' + e.message);
-  }
+  execSync('curl -L -s -o ' + tmp + ' "' + op.gtfs_url + '"');
+  execSync('unzip -o ' + tmp + ' -d ' + dir + ' > /dev/null');
+  console.log('  OK ' + op.id + ' extrait dans ' + dir);
 }
 
-/**
- * Téléchargement via NAP (Espagne - Renfe/Ouigo ES)
- */
+// ─── Téléchargement via NAP espagnol (clé API requise) ───────────────────────
 function downloadNAP(op) {
   return new Promise((resolve, reject) => {
     const dir = op.gtfs_dir;
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const tmp = '/tmp/gtfs_' + op.id + '.zip';
+    fs.mkdirSync(dir, { recursive: true });
+    const tmp  = '/tmp/gtfs_' + op.id + '.zip';
     console.log('  -> ' + op.id + ' (NAP id=' + op.gtfs_nap_id + ')');
-    
-    const url = 'https://nap.transportes.gob.es/api/v1/datasets/' + op.gtfs_nap_id + '/download';
-    const file = fs.createWriteStream(tmp);
-    
-    https.get(url, { headers: { 'X-API-KEY': NAP_API_KEY } }, (res) => {
-      if (res.statusCode === 302 || res.statusCode === 301) {
-        https.get(res.headers.location, (res2) => {
-          res2.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            execSync('unzip -o ' + tmp + ' -d ' + dir + ' > /dev/null');
-            console.log('  OK ' + op.id + ' extrait via NAP');
-            resolve();
-          });
-        });
-      } else {
+
+    const file    = fs.createWriteStream(tmp);
+    const options = {
+      hostname: 'nap.transportes.gob.es',
+      path:     '/api/Fichero/download/' + op.gtfs_nap_id,
+      method:   'GET',
+      headers:  { 'ApiKey': NAP_API_KEY, 'accept': 'application/octet-stream' },
+    };
+
+    function get(opts) {
+      https.get(opts, function(res) {
+        if (res.statusCode === 301 || res.statusCode === 302) {
+          console.log('     -> Redirection : ' + res.headers.location);
+          return get(res.headers.location);
+        }
+        if (res.statusCode !== 200) return reject(new Error('NAP HTTP ' + res.statusCode));
         res.pipe(file);
-        file.on('finish', () => {
+        file.on('finish', function() {
           file.close();
-          execSync('unzip -o ' + tmp + ' -d ' + dir + ' > /dev/null');
-          console.log('  OK ' + op.id + ' extrait via NAP');
-          resolve();
+          try {
+            execSync('unzip -o ' + tmp + ' -d ' + dir + ' > /dev/null');
+            console.log('  OK ' + op.id + ' extrait dans ' + dir);
+            resolve();
+          } catch(e) { reject(e); }
         });
-      }
-    }).on('error', reject);
+        file.on('error', reject);
+      }).on('error', reject);
+    }
+
+    get(options);
   });
 }
 
-/**
- * BOUCLE PRINCIPALE
- */
+// ─── Boucle principale ────────────────────────────────────────────────────────
 (async function() {
-  // On ignore l'ID "UK" ou "Avanti" car déjà traité en Partie 1
-  const filteredOps = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI');
+  // Ignorer UK/Avanti : déjà téléchargé et filtré en Partie 1
+  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI');
 
-  for (const op of filteredOps) {
+  for (const op of filtered) {
     try {
       if (op.gtfs_url) {
         downloadDirect(op);
       } else if (op.gtfs_nap_id) {
         await downloadNAP(op);
+      } else {
+        console.log('  SKIP ' + op.id + ' : aucune source configurée.');
       }
-    } catch (err) {
-      console.error('  ❌ Erreur fatale sur ' + op.id + ':', err.message);
+    } catch(err) {
+      console.error('  ERREUR ' + op.id + ' : ' + err.message);
+      process.exit(1);
     }
   }
-  console.log('--- Fin de la boucle Node ---');
 })();
 ENDNODE
 
-echo "✅ Tous les GTFS sont prêts et décompressés."
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 3 — Ingestion RAPTOR + index stations
+# ─────────────────────────────────────────────────────────────────────────────
+echo "⚙️  Ingestion GTFS -> engine_data..."
+node gtfs-ingest.js
+
+echo "🗺️  Construction index stations..."
+node build-stations-index.js
+
+echo "✅ Mise à jour terminée."
