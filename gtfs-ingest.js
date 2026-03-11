@@ -81,10 +81,8 @@ function parseCSVLine(line) {
 // ─── Filtres par opérateur ────────────────────────────────────────────────────
 
 const SNCF_EXCLUDE_SHORT = new Set(['CAR', 'NAVETTE', 'TRAMTRAIN']);
-// SNCB : garder national/international/régional, exclure banlieue (S) et bus
-// IC = InterCity, EC = EuroCity, NJ = NightJet, OTC = Thalys corridor
-// L  = Local interrégional, P = train de pointe régional
-// S  = S-Bahn banlieue (exclu), bus route_type 3 (exclu)
+// SNCB : IC/EC/NJ/OTC = international, L = local interregional, P = train de pointe
+// S = S-Bahn banlieue (exclu), bus route_type 3 (exclu)
 const SNCB_KEEP_SHORT    = new Set(['IC', 'EC', 'NJ', 'OTC', 'L', 'P']);
 
 function shouldKeepRoute(operatorId, r) {
@@ -98,8 +96,8 @@ function shouldKeepRoute(operatorId, r) {
       return true;
 
     case 'SNCB':
-      if (rtype === 3) return false;           // bus
-      if (short === 'S') return false;          // S-Bahn banlieue urbaine
+      if (rtype === 3) return false;          // bus
+      if (short === 'S') return false;         // S-Bahn banlieue urbaine
       return SNCB_KEEP_SHORT.has(short) || rtype === 2 || (rtype >= 100 && rtype <= 199);
 
     case 'RENFE': {
@@ -172,11 +170,42 @@ function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
   }
   for (const row of calendarDatesRows) allDates.add(row.date.trim());
 
+  // ── Optimisation mémoire ──────────────────────────────────────────────────
+  // Pré-indexer calendar par service_id pour éviter O(dates × services) passes
+  const calByService = new Map(); // service_id → {start, end, dow[7]}
+  for (const row of calendarRows) {
+    const start = parseGTFSDate(row.start_date).date;
+    const end   = parseGTFSDate(row.end_date).date;
+    const dow   = DOW_KEYS.map(k => row[k] === '1');
+    calByService.set(row.service_id, { start, end, dow });
+  }
+  // Pré-indexer calendar_dates par date
+  const cdByDate = new Map(); // gtfsDate → [{service_id, exception_type}]
+  for (const row of calendarDatesRows) {
+    const d = row.date.trim();
+    if (!cdByDate.has(d)) cdByDate.set(d, []);
+    cdByDate.get(d).push({ sid: row.service_id, type: row.exception_type });
+  }
+
   const index = {};
   for (const gtfsDate of allDates) {
-    const services = computeActiveServices(calendarRows, calendarDatesRows, gtfsDate);
+    const { date, dow } = parseGTFSDate(gtfsDate);
+    const active = new Set();
+
+    // calendar ranges
+    for (const [sid, cal] of calByService) {
+      if (date >= cal.start && date <= cal.end && cal.dow[dow]) active.add(sid);
+    }
+    // calendar_dates overrides
+    for (const { sid, type } of (cdByDate.get(gtfsDate) || [])) {
+      if (type === '1') active.add(sid);
+      else if (type === '2') active.delete(sid);
+    }
+
+    if (!active.size) continue; // ne pas stocker les dates sans service
+
     const iso = gtfsDate.slice(0,4)+'-'+gtfsDate.slice(4,6)+'-'+gtfsDate.slice(6,8);
-    index[iso] = [...services].map(s => prefix + ':' + s);
+    index[iso] = [...active].map(s => prefix + ':' + s);
   }
   return index;
 }
@@ -475,9 +504,7 @@ async function ingestOperator(op) {
       lon:            parseFloat(s.stop_lon)  || 0,
       operator:       operatorId,
       // stop_code = code CRS pour les gares UK (ex: "EUS", "KGX", "MAN")
-      // utilisé par build-stations-index pour l'index ATOC
       code:           s.stop_code ? s.stop_code.trim().toUpperCase() : undefined,
-      // Conserver le parent_station (avec préfixe opérateur) pour lier les quais entre eux
       parent_station: s.parent_station ? P(s.parent_station) : null,
     };
   }

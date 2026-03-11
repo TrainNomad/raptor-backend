@@ -126,26 +126,26 @@ function xferId(v) { return (typeof v === 'string') ? v : v.id; }
 // interCity: false = meme complexe (~5-10 min a pied)
 // interCity: true  = correspondance urbaine (~20-40 min)
 const INTER_TERMINAL_BRIDGES = [
-  // Paris
-  { nameA: 'Paris Gare du Nord',       nameB: "Paris Gare de l'Est",         interCity: false },
-  { nameA: 'Paris Gare du Nord',       nameB: 'Paris Gare de Lyon',          interCity: true  },
-  { nameA: 'Paris Gare du Nord',       nameB: 'Paris Montparnasse',          interCity: true  },
-  { nameA: "Paris Gare de l'Est",      nameB: 'Paris Gare de Lyon',          interCity: true  },
-  { nameA: "Paris Gare de l'Est",      nameB: 'Paris Montparnasse',          interCity: true  },
-  { nameA: 'Paris Gare de Lyon',       nameB: 'Paris Montparnasse',          interCity: true  },
-  // Londres
+  // Paris (country:'FR' evite tout faux positif)
+  { nameA: 'Paris Gare du Nord',       nameB: "Paris Gare de l'Est",         interCity: false, country: 'FR' },
+  { nameA: 'Paris Gare du Nord',       nameB: 'Paris Gare de Lyon',          interCity: true,  country: 'FR' },
+  { nameA: 'Paris Gare du Nord',       nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
+  { nameA: "Paris Gare de l'Est",      nameB: 'Paris Gare de Lyon',          interCity: true,  country: 'FR' },
+  { nameA: "Paris Gare de l'Est",      nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
+  { nameA: 'Paris Gare de Lyon',       nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
+  // Londres (country:'GB' indispensable — Waterloo/Victoria existent aussi en BE)
   // Euston <-> St Pancras : ~400m a pied — Avanti <-> Eurostar (lien cle)
-  { nameA: 'London Euston',            nameB: 'St Pancras International',    interCity: false },
+  { nameA: 'London Euston',            nameB: 'St Pancras International',    interCity: false, country: 'GB' },
   // St Pancras <-> Kings Cross : meme complexe (<2 min)
-  { nameA: 'St Pancras International', nameB: 'London Kings Cross',          interCity: false },
+  { nameA: 'St Pancras International', nameB: 'London Kings Cross',          interCity: false, country: 'GB' },
   // Euston <-> Kings Cross : ~800m
-  { nameA: 'London Euston',            nameB: 'London Kings Cross',          interCity: false },
+  { nameA: 'London Euston',            nameB: 'London Kings Cross',          interCity: false, country: 'GB' },
   // Paddington <-> Euston : ~20 min tube
-  { nameA: 'London Paddington',        nameB: 'London Euston',               interCity: true  },
+  { nameA: 'London Paddington',        nameB: 'London Euston',               interCity: true,  country: 'GB' },
   // Victoria <-> Waterloo : ~10 min tube
-  { nameA: 'London Victoria',          nameB: 'London Waterloo',             interCity: true  },
+  { nameA: 'London Victoria',          nameB: 'London Waterloo',             interCity: true,  country: 'GB' },
   // Victoria <-> St Pancras : ~20 min tube
-  { nameA: 'London Victoria',          nameB: 'St Pancras International',    interCity: true  },
+  { nameA: 'London Victoria',          nameB: 'St Pancras International',    interCity: true,  country: 'GB' },
 ];
 
 console.log('\n🔨 Construction stations.json depuis stations.csv...\n');
@@ -500,6 +500,90 @@ for (const [esBase, esStopIds] of Object.entries(slugToEsStops)) {
 }
 
 // ── Stops orphelins SNCF/TI (non couverts par le CSV) ────────────────────────
+
+// Convertit "LONDON EUSTON PLATFORM 1" → "London Euston Platform 1"
+function toTitleCase(s) {
+  const SMALL = new Set(['and','or','the','of','to','at','in','on','de','du','la','le','les','et','en']);
+  return s.toLowerCase().replace(/\b\w+/g, (w, offset) =>
+    (offset === 0 || !SMALL.has(w)) ? w[0].toUpperCase() + w.slice(1) : w
+  );
+}
+
+// ── Gares UK orphelines (stops GTFS UK non couverts par le CSV Trainline) ────
+// Le CSV Trainline a souvent atoc_is_enabled=false pour les gares UK.
+// On crée les gares directement depuis stops.json en groupant par stop_code (CRS).
+// Les noms GTFS UK sont en MAJUSCULES → on applique toTitleCase.
+const UK_PREFIXES = new Set(['VT','GR','SW','GW','SE','TL','GN','SN','NT','SR',
+  'EM','XC','TP','LE','ME','LO','LT','XR','HX','CC','CH','TW','AW','GC','GX',
+  'CS','IL','HT','LD']);
+
+const ukByCrs  = {};   // CRS code → [stopId, ...]
+const ukByName = {};   // normalized name → {name, lat, lon, stopIds, operators}
+
+for (const [sid, stop] of Object.entries(stops)) {
+  if (assignedStops.has(sid)) continue;
+  const op = stop.operator || extractOperator(sid);
+  if (!UK_PREFIXES.has(op)) continue;
+
+  const crs = stop.code;  // set by gtfs-ingest stop_code fix
+  if (crs) {
+    if (!ukByCrs[crs]) ukByCrs[crs] = [];
+    ukByCrs[crs].push(sid);
+  } else {
+    // fallback: group by normalized name
+    const key = (stop.name || sid).trim().toUpperCase()
+      .replace(/\s*PLATFORM.*$/, '').replace(/\s*PLT\s*\d*$/, '').trim();
+    if (!ukByName[key]) ukByName[key] = { name: key, lat: stop.lat||0, lon: stop.lon||0, stopIds: [], operators: new Set() };
+    ukByName[key].stopIds.push(sid);
+    ukByName[key].operators.add(op);
+  }
+}
+
+let nbUkCreated = 0;
+// Group CRS stops
+const ukCrsGroups = {};
+for (const [crs, sids] of Object.entries(ukByCrs)) {
+  if (sids.every(s => assignedStops.has(s))) continue;
+  // Get canonical name from first stop, strip platform info
+  const first = stops[sids[0]] || {};
+  const rawName = (first.name || crs).trim().toUpperCase();
+  const cleanName = toTitleCase(rawName.replace(/\s*PLATFORM.*$/, '').replace(/\s*PLT\s*\d*$/, '').trim());
+  if (!ukCrsGroups[crs]) {
+    ukCrsGroups[crs] = { name: cleanName, lat: first.lat||0, lon: first.lon||0, stopIds: [], operators: new Set() };
+  }
+  for (const sid of sids) {
+    if (!assignedStops.has(sid)) {
+      ukCrsGroups[crs].stopIds.push(sid);
+      ukCrsGroups[crs].operators.add(stops[sid]?.operator || extractOperator(sid));
+    }
+  }
+}
+for (const group of Object.values(ukCrsGroups)) {
+  if (!group.stopIds.length) continue;
+  stations.push({
+    name: group.name, city: extractCity(group.name), slug: '',
+    country: 'GB', lat: group.lat, lon: group.lon,
+    stopIds: group.stopIds, operators: [...group.operators].sort(),
+    sncf_id: null, ti_id: null, uic8: null,
+  });
+  for (const sid of group.stopIds) assignedStops.add(sid);
+  nbUkCreated++;
+}
+// Fallback: name-grouped UK stops (no CRS)
+for (const group of Object.values(ukByName)) {
+  if (group.stopIds.every(s => assignedStops.has(s))) continue;
+  const unassigned = group.stopIds.filter(s => !assignedStops.has(s));
+  stations.push({
+    name: toTitleCase(group.name), city: extractCity(toTitleCase(group.name)), slug: '',
+    country: 'GB', lat: group.lat, lon: group.lon,
+    stopIds: unassigned, operators: [...group.operators].sort(),
+    sncf_id: null, ti_id: null, uic8: null,
+  });
+  for (const sid of unassigned) assignedStops.add(sid);
+  nbUkCreated++;
+}
+console.log('  Gares UK creees  : ' + nbUkCreated);
+
 function normalizeStationName(n) {
   return n.toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -682,15 +766,20 @@ const nbUK = stations.filter(s => s.operators.some(o =>
 console.log('  Gares UK         : ' + nbUK);
 
 // ── findStationByName (helper pour les ponts + diagnostic) ───────────────────
-function findStationByName(name) {
+// country : restreindre la recherche à un pays ('GB', 'FR', etc.) pour éviter
+// les faux positifs (ex: "Waterloo" -> gare belge vs gare londonienne)
+function findStationByName(name, country) {
   const norm = s => s.toLowerCase().trim()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[\u2019']/g, "'");
   const n = norm(name);
-  return stations.find(s => norm(s.name) === n)
-      || stations.find(s => norm(s.name).startsWith(n))
-      || stations.find(s => norm(s.name).includes(n) || n.includes(norm(s.name)))
-      || null;
+  const pool = country ? stations.filter(s => s.country === country) : stations;
+  // 1. Match exact
+  let f = pool.find(s => norm(s.name) === n);
+  // 2. Commence par le critère (gare + suffixe plateforme)
+  if (!f) f = pool.find(s => norm(s.name).startsWith(n + ' ') || norm(s.name).startsWith(n));
+  // 3. Sans fallback 'includes' trop large — trop de faux positifs
+  return f || null;
 }
 
 // ── Ponts inter-terminaux → injection dans transfer_index.json ───────────────
@@ -699,10 +788,11 @@ let interTerminalLinks = 0;
 const xferUpdated = Object.assign({}, xfer);
 
 for (const bridge of INTER_TERMINAL_BRIDGES) {
-  const stA = findStationByName(bridge.nameA);
-  const stB = findStationByName(bridge.nameB);
-  if (!stA) { console.log('  [!] Non trouve : ' + bridge.nameA); continue; }
-  if (!stB) { console.log('  [!] Non trouve : ' + bridge.nameB); continue; }
+  const country = bridge.country || null;
+  const stA = findStationByName(bridge.nameA, country);
+  const stB = findStationByName(bridge.nameB, country);
+  if (!stA) { console.log('  [!] Non trouve : ' + bridge.nameA + (country ? ' [' + country + ']' : '')); continue; }
+  if (!stB) { console.log('  [!] Non trouve : ' + bridge.nameB + (country ? ' [' + country + ']' : '')); continue; }
   if (stA === stB) continue;
   let added = 0;
   for (const sidA of stA.stopIds) {
@@ -765,8 +855,8 @@ for (const nom of CHECK) {
 }
 console.log('\n-- Diagnostic ponts inter-terminaux --------------------------------');
 for (const bridge of INTER_TERMINAL_BRIDGES) {
-  const stA = findStationByName(bridge.nameA);
-  const stB = findStationByName(bridge.nameB);
+  const stA = findStationByName(bridge.nameA, bridge.country || null);
+  const stB = findStationByName(bridge.nameB, bridge.country || null);
   if (!stA || !stB || stA === stB) continue;
   const linked = stA.stopIds.some(sidA =>
     (xferUpdated[sidA] || []).some(x => stB.stopIds.includes(xferId(x)))
