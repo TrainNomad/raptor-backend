@@ -316,7 +316,31 @@ for (const row of csvRows) {
     }
   }
 
-  if (!allStopIds.size) continue;
+  if (!allStopIds.size) {
+    // Cas spécial : gare GB avec coordonnées valides mais sans stop UK GTFS
+    // (ex: London St Pancras = gare Eurostar, pas dans le GTFS Avanti)
+    // On cherche les stops ES proches par GPS (< 500m) ou par slug.
+    if (country !== 'GB' || !lat || !lon) continue;
+    // Chercher les stops ES par slug CSV
+    const esSlugAuto = csvSlug.replace(/-/g, '_');
+    const esSlugExp  = CSV_SLUG_TO_ES_SLUG[csvSlug];
+    for (const esSlug of [...new Set([esSlugExp, esSlugAuto].filter(Boolean))]) {
+      for (const sid of (slugToEsStops[esSlug] || [])) {
+        if (!assignedStops.has(sid)) { allStopIds.add(sid); operators.add('ES'); assignedEsSlugs.add(esSlug); }
+      }
+    }
+    // Chercher les stops ES par GPS (< 500m)
+    if (!allStopIds.size) {
+      for (const [sid, stop] of Object.entries(stops)) {
+        if (!sid.startsWith('ES:') || assignedStops.has(sid)) continue;
+        if (!stop.lat || !stop.lon) continue;
+        if (distMeters(lat, lon, stop.lat, stop.lon) < 500) {
+          allStopIds.add(sid); operators.add('ES');
+        }
+      }
+    }
+    if (!allStopIds.size) continue; // vraiment rien → on skip
+  }
 
   stations.push({
     name:      rawName,
