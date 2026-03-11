@@ -81,7 +81,11 @@ function parseCSVLine(line) {
 // ─── Filtres par opérateur ────────────────────────────────────────────────────
 
 const SNCF_EXCLUDE_SHORT = new Set(['CAR', 'NAVETTE', 'TRAMTRAIN']);
-const SNCB_KEEP_SHORT    = new Set(['IC', 'EC', 'NJ', 'OTC']);
+// SNCB : garder national/international/régional, exclure banlieue (S) et bus
+// IC = InterCity, EC = EuroCity, NJ = NightJet, OTC = Thalys corridor
+// L  = Local interrégional, P = train de pointe régional
+// S  = S-Bahn banlieue (exclu), bus route_type 3 (exclu)
+const SNCB_KEEP_SHORT    = new Set(['IC', 'EC', 'NJ', 'OTC', 'L', 'P']);
 
 function shouldKeepRoute(operatorId, r) {
   const short = (r.route_short_name || '').trim();
@@ -94,7 +98,9 @@ function shouldKeepRoute(operatorId, r) {
       return true;
 
     case 'SNCB':
-      return SNCB_KEEP_SHORT.has(short);
+      if (rtype === 3) return false;           // bus
+      if (short === 'S') return false;          // S-Bahn banlieue urbaine
+      return SNCB_KEEP_SHORT.has(short) || rtype === 2 || (rtype >= 100 && rtype <= 199);
 
     case 'RENFE': {
       // ✅ Exclure banlieue/commuter Renfe
@@ -464,10 +470,13 @@ async function ingestOperator(op) {
   for (const s of stopsRaw) {
     if (!usedStopIds.has(s.stop_id)) continue;
     stopsDict[P(s.stop_id)] = {
-      name:          s.stop_name || s.stop_id,
-      lat:           parseFloat(s.stop_lat)  || 0,
-      lon:           parseFloat(s.stop_lon)  || 0,
-      operator:      operatorId,
+      name:           s.stop_name || s.stop_id,
+      lat:            parseFloat(s.stop_lat)  || 0,
+      lon:            parseFloat(s.stop_lon)  || 0,
+      operator:       operatorId,
+      // stop_code = code CRS pour les gares UK (ex: "EUS", "KGX", "MAN")
+      // utilisé par build-stations-index pour l'index ATOC
+      code:           s.stop_code ? s.stop_code.trim().toUpperCase() : undefined,
       // Conserver le parent_station (avec préfixe opérateur) pour lier les quais entre eux
       parent_station: s.parent_station ? P(s.parent_station) : null,
     };
