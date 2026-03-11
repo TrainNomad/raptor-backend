@@ -41,6 +41,29 @@ function parseGTFSDate(d) {
 
 const DOW_KEYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
+// ── Fenêtre de dates : on ne conserve que les N prochains jours ──────────────
+// Réduit massivement calendar_index.json (88 MB → ~15 MB) et route_trips.json.
+// Modifier WINDOW_DAYS pour ajuster la profondeur de planification.
+const WINDOW_DAYS = 92; // ~3 mois glissants depuis aujourd'hui
+const WINDOW_START = new Date();
+WINDOW_START.setHours(0, 0, 0, 0);
+const WINDOW_END = new Date(WINDOW_START);
+WINDOW_END.setDate(WINDOW_END.getDate() + WINDOW_DAYS - 1);
+
+function inWindow(isoDate) {
+  // isoDate : 'YYYY-MM-DD'
+  const d = new Date(isoDate + 'T00:00:00');
+  return d >= WINDOW_START && d <= WINDOW_END;
+}
+function gtfsDateInWindow(gtfsDate) {
+  // gtfsDate : 'YYYYMMDD'
+  const iso = gtfsDate.slice(0,4)+'-'+gtfsDate.slice(4,6)+'-'+gtfsDate.slice(6,8);
+  return inWindow(iso);
+}
+
+console.log('  Fenetre dates   : ' + WINDOW_START.toISOString().slice(0,10)
+  + ' -> ' + WINDOW_END.toISOString().slice(0,10) + ' (' + WINDOW_DAYS + ' jours)');
+
 async function readCSV(filePath) {
   return new Promise((resolve) => {
     if (!fs.existsSync(filePath)) {
@@ -81,8 +104,6 @@ function parseCSVLine(line) {
 // ─── Filtres par opérateur ────────────────────────────────────────────────────
 
 const SNCF_EXCLUDE_SHORT = new Set(['CAR', 'NAVETTE', 'TRAMTRAIN']);
-// SNCB : IC/EC/NJ/OTC = international, L = local interregional, P = train de pointe
-// S = S-Bahn banlieue (exclu), bus route_type 3 (exclu)
 const SNCB_KEEP_SHORT    = new Set(['IC', 'EC', 'NJ', 'OTC', 'L', 'P']);
 
 function shouldKeepRoute(operatorId, r) {
@@ -96,8 +117,8 @@ function shouldKeepRoute(operatorId, r) {
       return true;
 
     case 'SNCB':
-      if (rtype === 3) return false;          // bus
-      if (short === 'S') return false;         // S-Bahn banlieue urbaine
+      if (rtype === 3) return false;
+      if (short === 'S') return false;
       return SNCB_KEEP_SHORT.has(short) || rtype === 2 || (rtype >= 100 && rtype <= 199);
 
     case 'RENFE': {
@@ -157,53 +178,49 @@ function computeActiveServices(calendarRows, calendarDatesRows, gtfsDate) {
 }
 
 function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
-  const allDates = new Set();
+  // Pré-indexer pour éviter O(dates × services)
+  const calByService = new Map();
   for (const row of calendarRows) {
-    const start = parseGTFSDate(row.start_date).date;
-    const end   = parseGTFSDate(row.end_date).date;
-    const cur   = new Date(start);
-    while (cur <= end) {
-      const y = cur.getFullYear(), m = String(cur.getMonth()+1).padStart(2,'0'), d = String(cur.getDate()).padStart(2,'0');
-      allDates.add(y+''+m+''+d);
-      cur.setDate(cur.getDate()+1);
-    }
+    calByService.set(row.service_id, {
+      start: parseGTFSDate(row.start_date).date,
+      end:   parseGTFSDate(row.end_date).date,
+      dow:   DOW_KEYS.map(k => row[k] === '1'),
+    });
   }
-  for (const row of calendarDatesRows) allDates.add(row.date.trim());
-
-  // ── Optimisation mémoire ──────────────────────────────────────────────────
-  // Pré-indexer calendar par service_id pour éviter O(dates × services) passes
-  const calByService = new Map(); // service_id → {start, end, dow[7]}
-  for (const row of calendarRows) {
-    const start = parseGTFSDate(row.start_date).date;
-    const end   = parseGTFSDate(row.end_date).date;
-    const dow   = DOW_KEYS.map(k => row[k] === '1');
-    calByService.set(row.service_id, { start, end, dow });
-  }
-  // Pré-indexer calendar_dates par date
-  const cdByDate = new Map(); // gtfsDate → [{service_id, exception_type}]
+  const cdByDate = new Map();
   for (const row of calendarDatesRows) {
     const d = row.date.trim();
     if (!cdByDate.has(d)) cdByDate.set(d, []);
     cdByDate.get(d).push({ sid: row.service_id, type: row.exception_type });
   }
 
+  // Collecter uniquement les dates dans la fenetre
+  const allDates = new Set();
+  for (const { start, end } of calByService.values()) {
+    const cur = new Date(Math.max(start, WINDOW_START));
+    const stop = new Date(Math.min(end,   WINDOW_END));
+    while (cur <= stop) {
+      const y = cur.getFullYear(), m = String(cur.getMonth()+1).padStart(2,'0'), d = String(cur.getDate()).padStart(2,'0');
+      allDates.add(y+''+m+''+d);
+      cur.setDate(cur.getDate()+1);
+    }
+  }
+  for (const d of cdByDate.keys()) {
+    if (gtfsDateInWindow(d)) allDates.add(d);
+  }
+
   const index = {};
   for (const gtfsDate of allDates) {
     const { date, dow } = parseGTFSDate(gtfsDate);
     const active = new Set();
-
-    // calendar ranges
     for (const [sid, cal] of calByService) {
       if (date >= cal.start && date <= cal.end && cal.dow[dow]) active.add(sid);
     }
-    // calendar_dates overrides
     for (const { sid, type } of (cdByDate.get(gtfsDate) || [])) {
       if (type === '1') active.add(sid);
       else if (type === '2') active.delete(sid);
     }
-
-    if (!active.size) continue; // ne pas stocker les dates sans service
-
+    if (!active.size) continue;
     const iso = gtfsDate.slice(0,4)+'-'+gtfsDate.slice(4,6)+'-'+gtfsDate.slice(6,8);
     index[iso] = [...active].map(s => prefix + ':' + s);
   }
@@ -503,7 +520,6 @@ async function ingestOperator(op) {
       lat:            parseFloat(s.stop_lat)  || 0,
       lon:            parseFloat(s.stop_lon)  || 0,
       operator:       operatorId,
-      // stop_code = code CRS pour les gares UK (ex: "EUS", "KGX", "MAN")
       code:           s.stop_code ? s.stop_code.trim().toUpperCase() : undefined,
       parent_station: s.parent_station ? P(s.parent_station) : null,
     };
@@ -602,6 +618,18 @@ async function ingestOperator(op) {
   for (const rid of Object.keys(routeTrips)) {
     routeTrips[rid].sort((a, b) => a.dep_time_first - b.dep_time_first);
   }
+
+  // ── Élagage : ne garder que les trips actifs dans la fenetre de dates ──────
+  // Un trip est utile si son service_id apparaît au moins une fois dans calendarIndex.
+  const activeServiceIds = new Set(Object.values(calendarIndex).flat());
+  let prunedTrips = 0;
+  for (const rid of Object.keys(routeTrips)) {
+    const before = routeTrips[rid].length;
+    routeTrips[rid] = routeTrips[rid].filter(t => activeServiceIds.has(t.service_id));
+    prunedTrips += before - routeTrips[rid].length;
+    if (!routeTrips[rid].length) delete routeTrips[rid];
+  }
+  console.log('    trips elagues   : ' + prunedTrips.toLocaleString() + ' hors fenetre');
 
   const routesByStopSerial = {};
   for (const [stop, routes] of Object.entries(routesByStop)) {
