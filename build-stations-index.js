@@ -317,11 +317,20 @@ for (const row of csvRows) {
   }
 
   if (!allStopIds.size) {
-    // Cas spécial : gare GB avec coordonnées valides mais sans stop UK GTFS
-    // (ex: London St Pancras = gare Eurostar, pas dans le GTFS Avanti)
-    // On cherche les stops ES proches par GPS (< 500m) ou par slug.
+    // Cas spécial : gare GB avec coordonnées valides mais sans stop trouvé via atoc_id
+    // Raison : le GTFS UK (Avanti Only) ne contient pas toutes les gares du CSV GB
+    // → on cherche les stops UK GTFS par GPS (< 400m) puis les stops ES
     if (country !== 'GB' || !lat || !lon) continue;
-    // Chercher les stops ES par slug CSV
+
+    // (A) Chercher les stops UK GTFS par GPS
+    for (const [sid, stop] of Object.entries(stops)) {
+      if (!sid.startsWith('UK:') || assignedStops.has(sid)) continue;
+      if (!stop.lat || !stop.lon) continue;
+      if (distMeters(lat, lon, stop.lat, stop.lon) < 400) {
+        allStopIds.add(sid); operators.add('UK');
+      }
+    }
+    // (B) Chercher les stops ES par slug CSV
     const esSlugAuto = csvSlug.replace(/-/g, '_');
     const esSlugExp  = CSV_SLUG_TO_ES_SLUG[csvSlug];
     for (const esSlug of [...new Set([esSlugExp, esSlugAuto].filter(Boolean))]) {
@@ -329,8 +338,8 @@ for (const row of csvRows) {
         if (!assignedStops.has(sid)) { allStopIds.add(sid); operators.add('ES'); assignedEsSlugs.add(esSlug); }
       }
     }
-    // Chercher les stops ES par GPS (< 500m)
-    if (!allStopIds.size) {
+    // (C) Chercher les stops ES par GPS (< 500m)
+    if (!allStopIds.size || !operators.has('ES')) {
       for (const [sid, stop] of Object.entries(stops)) {
         if (!sid.startsWith('ES:') || assignedStops.has(sid)) continue;
         if (!stop.lat || !stop.lon) continue;
@@ -339,7 +348,10 @@ for (const row of csvRows) {
         }
       }
     }
-    if (!allStopIds.size) continue; // vraiment rien → on skip
+    // (D) Si toujours rien mais gare GB importante (parent=8267 = Londres),
+    //     créer un nœud vide pour permettre les bridges inter-terminaux
+    // (les bridges injecteront les liens dans transfer_index même sans stopIds)
+    if (!allStopIds.size) continue; // skip les gares GB vraiment sans aucun stop
   }
 
   stations.push({
