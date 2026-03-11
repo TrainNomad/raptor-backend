@@ -285,8 +285,8 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
       if (rs === 'AVANT')     return 'AVANT';
       if (rs === 'EUROMED')   return 'EUROMED';
       if (rs === 'INTERCITY') return 'INTERCITY_ES';
-      if (rs === 'Media Distancia')        return 'MD';
-      if (rs === 'Reg. Exprés')  return 'REG_EXP';
+      if (rs === 'MD')        return 'MD';
+      if (rs === 'REG.EXP.')  return 'REG_EXP';
       if (rs === 'REGIONAL')  return 'REGIONAL_ES';
       if (rs === 'TRENCELTA') return 'REGIONAL_ES';
       if (rs === 'PROXIMDAD') return 'MD';
@@ -309,15 +309,24 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
 
     case 'UK': {
       // VT = Avanti West Coast, CS = Caledonian Sleeper
-      // Le trip_id UK commence souvent par le code agence (ex: VT12345, CS98765)
-      const prefix = (tripId || '').substring(0, 2).toUpperCase();
-      if (prefix === 'VT') return 'AVANTI';
-      if (prefix === 'CS') return 'CALEDONIAN_SLEEPER';
-      // Fallback sur route_short_name si le trip_id ne commence pas par le code
+      // Le trip_id GTFS Avanti peut avoir différents formats selon la version du feed :
+      //   - "VT12345" (préfixe agence direct)
+      //   - "VT_YYYYMMDD_12345" (avec date)
+      //   - UUID ou autre format sans préfixe lisible → fallback sur route_short_name
+      const tidUpper = (tripId || '').toUpperCase();
+      // Préfixe direct
+      if (tidUpper.startsWith('VT')) return 'AVANTI';
+      if (tidUpper.startsWith('CS')) return 'CALEDONIAN_SLEEPER';
+      // Code agence n'importe où dans le trip_id (ex: _VT_ ou -VT-)
+      if (/(?:^|[^A-Z])VT(?:[^A-Z]|$)/.test(tidUpper)) return 'AVANTI';
+      if (/(?:^|[^A-Z])CS(?:[^A-Z]|$)/.test(tidUpper)) return 'CALEDONIAN_SLEEPER';
+      // Fallback sur route_short_name
       const rs = (routeShort || '').toLowerCase();
       if (rs.includes('avanti') || rs.includes('west coast')) return 'AVANTI';
       if (rs.includes('caledonian') || rs.includes('sleeper'))  return 'CALEDONIAN_SLEEPER';
-      return 'UK_RAIL';
+      // Fallback final : tout ce qui vient du GTFS Avanti Only est Avanti
+      // (le GTFS est déjà filtré pour n'inclure que VT + CS par le workflow GitHub)
+      return 'AVANTI';
     }
 
     default:
