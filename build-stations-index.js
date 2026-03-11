@@ -394,8 +394,14 @@ for (const [esBase, esStopIds] of Object.entries(slugToEsStops)) {
 // ── Stops UK orphelins (non couverts par CSV avec atoc_is_enabled=t) ──────────
 // Les noms GTFS UK sont souvent en ALL CAPS avec suffixes Platform → nettoyage
 const CRS_NAMES = {
+  // Londres — noms AVEC préfixe "London" pour cohérence avec stations.csv et bridges
+  'STP':'London St Pancras International',
   'EUS':'London Euston','KGX':'London Kings Cross','PAD':'London Paddington',
-  'VIC':'London Victoria','WAT':'London Waterloo','STP':'St Pancras International',
+  'VIC':'London Victoria','WAT':'London Waterloo','WAE':'London Waterloo',
+  'LST':'London Liverpool Street','LBG':'London Bridge',
+  'MYB':'London Marylebone','CHX':'London Charing Cross',
+  'CST':'London Cannon Street','FST':'London Fenchurch Street','BFR':'London Blackfriars',
+  // Reste UK
   'MAN':'Manchester Piccadilly','MCV':'Manchester Piccadilly',
   'BHM':'Birmingham New Street','GLC':'Glasgow Central',
   'EDB':'Edinburgh','LIV':'Liverpool Lime Street',
@@ -570,21 +576,167 @@ for (const s of stations) countryCount[s.country] = (countryCount[s.country]||0)
 console.log('  Par opérateur : ' + Object.entries(opCount).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+'='+v).join(', '));
 console.log('  Par pays      : ' + Object.entries(countryCount).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+'='+v).join(', '));
 
-// ── Ponts inter-terminaux ─────────────────────────────────────────────────────
+// xferUpdated : copie mutable du transfer_index, enrichie au fil des sections suivantes
+const xferUpdated = Object.assign({}, xfer);
+
+// ── Ponts inter-terminaux via parent_station_id du CSV ───────────────────────
+// Le CSV stations.csv contient un champ parent_station_id qui indique la ville.
+// Ex : toutes les gares de Londres ont parent_station_id=8267 (London).
+// On charge ce fichier pour construire un index ville → gares sœurs,
+// puis on injecte dans transfer_index tous les liens croisés.
+
+console.log('\n-- Ponts par ville (parent_station_id CSV) ------------------------');
+{
+  const csvRowsForParent = parseCsv(CSV_FILE);
+  // id → parent_station_id
+  const csvParentMap = {};
+  const csvIdToName  = {};
+  const csvIdToSlug  = {};
+  for (const row of csvRowsForParent) {
+    if (!row.id) continue;
+    csvParentMap[row.id] = row.parent_station_id || '';
+    csvIdToName[row.id]  = row.name || '';
+    csvIdToSlug[row.id]  = row.slug || '';
+  }
+  // parent_id → [child csv ids]
+  const parentToChildren = {};
+  for (const [id, parent] of Object.entries(csvParentMap)) {
+    if (!parent) continue;
+    if (!parentToChildren[parent]) parentToChildren[parent] = [];
+    parentToChildren[parent].push(id);
+  }
+  // Pour chaque groupe, trouver les stations.json correspondantes via slug
+  const slugToStation = {};
+  for (const st of stations) {
+    if (st.slug) slugToStation[st.slug] = st;
+    // Aussi par nom normalisé pour le fallback
+    const normName = (st.name||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    slugToStation['__name__' + normName] = st;
+  }
+  let cityBridgeLinks = 0;
+  let cityGroupsProcessed = 0;
+  for (const [parentId, childIds] of Object.entries(parentToChildren)) {
+    if (childIds.length < 2) continue;
+    // Trouver les stations.json pour chaque enfant
+    const childStations = [];
+    for (const cid of childIds) {
+      const slug = csvIdToSlug[cid];
+      const name = csvIdToName[cid];
+      let st = slug ? slugToStation[slug] : null;
+      if (!st && name) {
+        const normName = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        st = slugToStation['__name__' + normName];
+      }
+      if (st && !childStations.includes(st)) childStations.push(st);
+    }
+    if (childStations.length < 2) continue;
+    // Générer les ponts entre toutes les stations du groupe
+    // Convention : même ville → interCity:true (nécessite un déplacement)
+    // Sauf si elles sont déjà proches GPS (< 500m) → interCity:false
+    for (let ci = 0; ci < childStations.length; ci++) {
+      for (let cj = ci + 1; cj < childStations.length; cj++) {
+        const stA = childStations[ci];
+        const stB = childStations[cj];
+        if (stA === stB) continue;
+        // Distance approximative
+        const dLat = (stA.lat - stB.lat) * 111000;
+        const dLon = (stA.lon - stB.lon) * 111000 * Math.cos((stA.lat + stB.lat) / 2 * Math.PI / 180);
+        const dist = Math.sqrt(dLat*dLat + dLon*dLon);
+        const interCity = dist > 500;
+        for (const sidA of stA.stopIds) {
+          if (!xferUpdated[sidA]) xferUpdated[sidA] = [];
+          for (const sidB of stB.stopIds) {
+            const link = interCity ? { id: sidB, interCity: true } : sidB;
+            if (!xferUpdated[sidA].some(x => xferId(x) === sidB)) {
+              xferUpdated[sidA].push(link); cityBridgeLinks++;
+            }
+          }
+        }
+        for (const sidB of stB.stopIds) {
+          if (!xferUpdated[sidB]) xferUpdated[sidB] = [];
+          for (const sidA of stA.stopIds) {
+            const link = interCity ? { id: sidA, interCity: true } : sidA;
+            if (!xferUpdated[sidB].some(x => xferId(x) === sidA)) {
+              xferUpdated[sidB].push(link); cityBridgeLinks++;
+            }
+          }
+        }
+      }
+    }
+    cityGroupsProcessed++;
+  }
+  console.log(`  ${cityGroupsProcessed} villes traitées, +${cityBridgeLinks} liens inter-gares injectés`);
+}
+
+
+// Londres : toutes les grandes gares partagent parent_station_id=8267 (London)
+// dans stations.csv — on génère automatiquement tous les ponts entre elles.
+// Les gares proches (<15 min à pied) sont marquées interCity:false,
+// les gares éloignées (>15 min, nécessitant le métro) interCity:true.
+//
+// Matrice de distance Londres (walking/tube) :
+//   St Pancras ↔ Kings Cross     : ~2 min à pied → interCity:false
+//   St Pancras ↔ Euston          : ~10 min à pied → interCity:false
+//   Kings Cross ↔ Euston         : ~10 min à pied → interCity:false
+//   Paddington ↔ Euston          : ~20 min tube → interCity:true
+//   Paddington ↔ Kings Cross     : ~20 min tube → interCity:true
+//   Paddington ↔ St Pancras      : ~20 min tube → interCity:true
+//   Victoria ↔ Waterloo          : ~15 min tube → interCity:true
+//   Victoria ↔ St Pancras        : ~20 min tube → interCity:true
+//   Victoria ↔ Kings Cross       : ~20 min tube → interCity:true
+//   Victoria ↔ Euston            : ~20 min tube → interCity:true
+//   Liverpool Street ↔ St Pancras: ~15 min tube → interCity:true
+//   London Bridge ↔ St Pancras   : ~15 min tube → interCity:true
+//   Marylebone ↔ Euston          : ~15 min walk → interCity:true
+//   Waterloo ↔ St Pancras        : ~25 min tube → interCity:true
+//   Waterloo ↔ Kings Cross       : ~25 min tube → interCity:true
+
+// Groupes Londres : gares proches entre elles (pas de tube requis)
+const LONDON_CLOSE_GROUP = [
+  // Cluster Nord (St Pancras / Kings Cross / Euston) — ~10 min à pied max
+  'London St Pancras International',
+  'London Kings Cross',
+  'London Euston',
+];
+// Toutes les autres gares Londres sont à ~15-40 min → interCity:true
+const LONDON_ALL_TERMINALS = [
+  'London St Pancras International',
+  'London Kings Cross',
+  'London Euston',
+  'London Paddington',
+  'London Victoria',
+  'London Waterloo',
+  'London Liverpool Street',
+  'London Bridge',
+  'London Marylebone',
+  'London Charing Cross',
+  'London Cannon Street',
+  'London Fenchurch Street',
+  'London Blackfriars',
+];
+
 const INTER_TERMINAL_BRIDGES = [
+  // Paris — liaisons inter-gares
   { nameA: 'Paris Gare du Nord',       nameB: "Paris Gare de l'Est",         interCity: false, country: 'FR' },
   { nameA: 'Paris Gare du Nord',       nameB: 'Paris Gare de Lyon',          interCity: true,  country: 'FR' },
   { nameA: 'Paris Gare du Nord',       nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
   { nameA: "Paris Gare de l'Est",      nameB: 'Paris Gare de Lyon',          interCity: true,  country: 'FR' },
   { nameA: "Paris Gare de l'Est",      nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
   { nameA: 'Paris Gare de Lyon',       nameB: 'Paris Montparnasse',          interCity: true,  country: 'FR' },
-  { nameA: 'London Euston',            nameB: 'St Pancras International',    interCity: false, country: 'GB' },
-  { nameA: 'St Pancras International', nameB: 'London Kings Cross',          interCity: false, country: 'GB' },
-  { nameA: 'London Euston',            nameB: 'London Kings Cross',          interCity: false, country: 'GB' },
-  { nameA: 'London Paddington',        nameB: 'London Euston',               interCity: true,  country: 'GB' },
-  { nameA: 'London Victoria',          nameB: 'London Waterloo',             interCity: true,  country: 'GB' },
-  { nameA: 'London Victoria',          nameB: 'St Pancras International',    interCity: true,  country: 'GB' },
 ];
+
+// Génération automatique des ponts Londres à partir des groupes
+for (let i = 0; i < LONDON_ALL_TERMINALS.length; i++) {
+  for (let j = i + 1; j < LONDON_ALL_TERMINALS.length; j++) {
+    const nameA = LONDON_ALL_TERMINALS[i];
+    const nameB = LONDON_ALL_TERMINALS[j];
+    // interCity:false uniquement si les deux gares sont dans le cluster proche
+    const closeA = LONDON_CLOSE_GROUP.includes(nameA);
+    const closeB = LONDON_CLOSE_GROUP.includes(nameB);
+    const interCity = !(closeA && closeB);
+    INTER_TERMINAL_BRIDGES.push({ nameA, nameB, interCity, country: 'GB' });
+  }
+}
 function findStationByName(name, country) {
   const norm = s => s.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u2019']/g,"'");
   const n = norm(name);
@@ -595,7 +747,6 @@ function findStationByName(name, country) {
 }
 console.log('\n-- Ponts inter-terminaux ------------------------------------------');
 let interTerminalLinks = 0;
-const xferUpdated = Object.assign({}, xfer);
 for (const bridge of INTER_TERMINAL_BRIDGES) {
   const stA = findStationByName(bridge.nameA, bridge.country);
   const stB = findStationByName(bridge.nameB, bridge.country);
@@ -633,7 +784,7 @@ const CHECK = [
   'Bruxelles-Midi', 'Amsterdam-Centraal',
   'Madrid Atocha', 'Barcelona Sants', 'Madrid-Chamartín-Clara Campoamor',
   'Lisboa Santa Apolónia', 'Porto Campanhã',
-  'London Euston', 'St Pancras International', 'Edinburgh',
+  'London Euston', 'London St Pancras International', 'Edinburgh',
   'Milano Centrale', 'Torino Porta Susa',
 ];
 for (const nom of CHECK) {

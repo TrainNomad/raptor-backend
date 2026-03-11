@@ -285,8 +285,8 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
       if (rs === 'AVANT')     return 'AVANT';
       if (rs === 'EUROMED')   return 'EUROMED';
       if (rs === 'INTERCITY') return 'INTERCITY_ES';
-      if (rs === 'MD')        return 'MD';
-      if (rs === 'REG.EXP.')  return 'REG_EXP';
+      if (rs === 'Media Distancia')        return 'MD';
+      if (rs === 'Reg. Exprés')  return 'REG_EXP';
       if (rs === 'REGIONAL')  return 'REGIONAL_ES';
       if (rs === 'TRENCELTA') return 'REGIONAL_ES';
       if (rs === 'PROXIMDAD') return 'MD';
