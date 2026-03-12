@@ -46,8 +46,8 @@
     "note": "Feed officiel CP — couvre AP (Alfa Pendular, grande vitesse), IC (Intercidades) et IR (Inter-regional). URL directe publique, pas besoin de cle API. Mis a jour regulierement par CP."
   },
   {
-  "id": "UK",
-  "name": "Avanti West Coast",
-  "gtfs_dir": "./gtfs/Avanti_Only"
-}
+    "id": "UK",
+    "name": "UK Longue Distance (Avanti · LNER · CrossCountry · GWR · EMR · Lumo…)",
+    "gtfs_dir": "./gtfs/UK_Intercity"
+  }
 ]
