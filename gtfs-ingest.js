@@ -685,6 +685,38 @@ async function ingestOperator(op) {
     routeTrips[rid].sort((a, b) => a.dep_time_first - b.dep_time_first);
   }
 
+  // ── Élagage UK : supprimer les routes avec < 4 arrêts (trains de banlieue) ─
+  // GW/SW/TP/EM incluent des services locaux courts qu'on ne veut pas
+  if (operatorId === 'UK') {
+    let prunedRoutes = 0;
+    for (const rid of Object.keys(routeTrips)) {
+      const nStops = (routeStops[rid] || []).length;
+      if (nStops < 4) {
+        delete routeTrips[rid];
+        delete routeStops[rid];
+        delete routeInfo[rid];
+        prunedRoutes++;
+      }
+    }
+    if (prunedRoutes) console.log(`    routes <4 stops pruned : ${prunedRoutes}`);
+
+    // Cap trips par route : max 80 trips/route (une toutes les ~18min sur 24h)
+    // Évite l'explosion mémoire sur les grandes lignes cadencées
+    let prunedTrips = 0;
+    const MAX_TRIPS_PER_ROUTE = 80;
+    for (const rid of Object.keys(routeTrips)) {
+      if (routeTrips[rid].length > MAX_TRIPS_PER_ROUTE) {
+        // Garder une distribution uniforme sur la journée
+        const all = routeTrips[rid];
+        const step = all.length / MAX_TRIPS_PER_ROUTE;
+        const kept = Array.from({length: MAX_TRIPS_PER_ROUTE}, (_, i) => all[Math.round(i * step)]);
+        prunedTrips += all.length - MAX_TRIPS_PER_ROUTE;
+        routeTrips[rid] = kept;
+      }
+    }
+    if (prunedTrips) console.log(`    trips capped (>${MAX_TRIPS_PER_ROUTE}/route) : ${prunedTrips}`);
+  }
+
   const routesByStopSerial = {};
   for (const [stop, routes] of Object.entries(routesByStop)) {
     routesByStopSerial[stop] = [...routes];
@@ -821,10 +853,10 @@ async function main() {
   writeJSON('trip_stop_times.json',  tripStopTimesCompact); // compact (par trip_id)
 
   // Taille des fichiers générés
-  const DATA_DIR_PATH = path.join(__dirname, DATA_DIR);
+  // Tailles fichiers
   for (const f of ['route_trips.json','route_trips_meta.json','trip_stop_times.json',
                     'calendar_index.json','stops.json']) {
-    const fp = path.join(DATA_DIR_PATH, f);
+    const fp = path.join(OUT_DIR, f);
     if (fs.existsSync(fp)) {
       const kb = Math.round(fs.statSync(fp).size / 1024);
       console.log('  ' + f.padEnd(30) + kb.toLocaleString() + ' KB');
