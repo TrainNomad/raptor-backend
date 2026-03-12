@@ -42,7 +42,7 @@ function parseGTFSDate(d) {
 const DOW_KEYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
 // ── Fenêtre 92 jours ──────────────────────────────────────────────────────────
-const WINDOW_DAYS  = 92;
+const WINDOW_DAYS  = 90;  // 3 mois glissants
 const WINDOW_START = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
 const WINDOW_END   = (() => { const d = new Date(WINDOW_START); d.setDate(d.getDate() + WINDOW_DAYS - 1); return d; })();
 function gtfsDateInWindow(g) {
@@ -790,9 +790,46 @@ async function main() {
   writeJSON('routes_info.json',    merged.routeInfo);
   writeJSON('routes_by_stop.json', merged.routesByStop);
   writeJSON('route_stops.json',    merged.routeStops);
-  writeJSON('route_trips.json',    merged.routeTrips);
   writeJSON('calendar_index.json', merged.calendarIndex);
   writeJSON('transfer_index.json', transferIndex);
+
+  // ── Écriture séparée : route_trips (méta) + trip_stop_times (horaires) ─────
+  // route_trips.json       → identique à avant (stop_times inclus) pour compatibilité server.js
+  // trip_stop_times.json   → format compact [[dep,arr],...] par trip_id
+  //                          arrArr omis si égal à dep ; indices = routeStops[routeId]
+  // route_trips_meta.json  → route_trips SANS stop_times (chargement léger possible)
+  const tripStopTimesCompact = {};
+  const routeTripsMeta       = {};
+  for (const [routeId, trips] of Object.entries(merged.routeTrips)) {
+    routeTripsMeta[routeId] = trips.map(t => ({
+      trip_id:        t.trip_id,
+      service_id:     t.service_id,
+      dep_time_first: t.dep_time_first,
+      train_type:     t.train_type,
+      operator:       t.operator,
+    }));
+    for (const t of trips) {
+      tripStopTimesCompact[t.trip_id] = t.stop_times.map(s => {
+        const dep = s.dep_time;
+        const arr = (s.arr_time !== null && s.arr_time !== dep) ? s.arr_time : null;
+        return arr !== null ? [dep, arr] : [dep];
+      });
+    }
+  }
+  writeJSON('route_trips.json',      merged.routeTrips);   // compatibilité server.js
+  writeJSON('route_trips_meta.json', routeTripsMeta);       // léger (sans stop_times)
+  writeJSON('trip_stop_times.json',  tripStopTimesCompact); // compact (par trip_id)
+
+  // Taille des fichiers générés
+  const DATA_DIR_PATH = path.join(__dirname, DATA_DIR);
+  for (const f of ['route_trips.json','route_trips_meta.json','trip_stop_times.json',
+                    'calendar_index.json','stops.json']) {
+    const fp = path.join(DATA_DIR_PATH, f);
+    if (fs.existsSync(fp)) {
+      const kb = Math.round(fs.statSync(fp).size / 1024);
+      console.log('  ' + f.padEnd(30) + kb.toLocaleString() + ' KB');
+    }
+  }
 
   const sortedDates = Object.keys(merged.calendarIndex).sort();
   const meta = {
