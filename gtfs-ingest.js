@@ -41,16 +41,81 @@ function parseGTFSDate(d) {
 
 const DOW_KEYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
 
-// ── Fenêtre de dates (~3 mois) ────────────────────────────────────────────────
+// ── Fenêtre 92 jours ──────────────────────────────────────────────────────────
 const WINDOW_DAYS  = 92;
 const WINDOW_START = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
 const WINDOW_END   = (() => { const d = new Date(WINDOW_START); d.setDate(d.getDate() + WINDOW_DAYS - 1); return d; })();
-function gtfsDateInWindow(gtfsDate) {
-  const d = new Date(gtfsDate.slice(0,4)+'-'+gtfsDate.slice(4,6)+'-'+gtfsDate.slice(6,8)+'T00:00:00');
+function gtfsDateInWindow(g) {
+  const d = new Date(g.slice(0,4)+'-'+g.slice(4,6)+'-'+g.slice(6,8)+'T00:00:00');
   return d >= WINDOW_START && d <= WINDOW_END;
 }
-console.log('  Fenetre dates : ' + WINDOW_START.toISOString().slice(0,10)
+console.log('  Fenetre : ' + WINDOW_START.toISOString().slice(0,10)
   + ' -> ' + WINDOW_END.toISOString().slice(0,10));
+
+// ── Stream CSV ligne par ligne avec callback de filtre ────────────────────────
+// onRow(row, headers) → true = garder, false = ignorer
+// Retourne une Map si keyField fourni, sinon un Array
+function streamCSV(filePath, onRow) {
+  return new Promise((resolve, reject) => {
+    if (!require('fs').existsSync(filePath)) {
+      console.warn('    ⚠  Manquant : ' + require('path').basename(filePath));
+      return resolve([]);
+    }
+    const rows = []; let headers = null;
+    const rl = require('readline').createInterface({
+      input: require('fs').createReadStream(filePath, { encoding: 'utf8', highWaterMark: 256*1024 }),
+      crlfDelay: Infinity,
+    });
+    rl.on('line', (raw) => {
+      const line = raw.replace(/^﻿/,'').trim();
+      if (!line) return;
+      const cols = parseCSVLine(line);
+      if (!headers) { headers = cols; return; }
+      const row = {};
+      headers.forEach((h,i) => { row[h] = (cols[i]||'').trim(); });
+      if (onRow(row)) rows.push(row);
+    });
+    rl.on('close', () => resolve(rows));
+    rl.on('error', reject);
+  });
+}
+
+// ── Calcule les service_ids actifs dans la fenêtre ────────────────────────────
+function activeServiceIdsInWindow(calendarRows, calendarDatesRows) {
+  const active = new Set();
+  const calByService = new Map();
+  for (const row of calendarRows) {
+    calByService.set(row.service_id, {
+      start: parseGTFSDate(row.start_date).date,
+      end:   parseGTFSDate(row.end_date).date,
+      dow:   DOW_KEYS.map(k => row[k] === '1'),
+    });
+  }
+  const cdByDate = new Map();
+  for (const row of calendarDatesRows) {
+    if (!gtfsDateInWindow(row.date.trim())) continue;
+    if (!cdByDate.has(row.date)) cdByDate.set(row.date, []);
+    cdByDate.get(row.date).push({ sid: row.service_id, type: row.exception_type });
+  }
+  const cur = new Date(WINDOW_START);
+  while (cur <= WINDOW_END) {
+    const g = cur.getFullYear()+String(cur.getMonth()+1).padStart(2,'0')+String(cur.getDate()).padStart(2,'0');
+    const { date, dow } = parseGTFSDate(g);
+    for (const [sid, cal] of calByService) {
+      if (date >= cal.start && date <= cal.end && cal.dow[dow]) active.add(sid);
+    }
+    for (const { sid, type } of (cdByDate.get(g) || [])) {
+      if (type === '1') active.add(sid);
+    }
+    cur.setDate(cur.getDate()+1);
+  }
+  for (const [, overrides] of cdByDate) {
+    for (const { sid, type } of overrides) {
+      if (type === '1') active.add(sid);
+    }
+  }
+  return active;
+}
 
 async function readCSV(filePath) {
   return new Promise((resolve) => {
@@ -166,7 +231,6 @@ function computeActiveServices(calendarRows, calendarDatesRows, gtfsDate) {
 }
 
 function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
-  // Pré-indexer pour éviter O(dates × services)
   const calByService = new Map();
   for (const row of calendarRows) {
     calByService.set(row.service_id, {
@@ -178,24 +242,22 @@ function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
   const cdByDate = new Map();
   for (const row of calendarDatesRows) {
     const d = row.date.trim();
+    if (!gtfsDateInWindow(d)) continue;
     if (!cdByDate.has(d)) cdByDate.set(d, []);
     cdByDate.get(d).push({ sid: row.service_id, type: row.exception_type });
   }
-  // Collect only dates inside the window
+  // Générer uniquement les dates dans la fenêtre
   const allDates = new Set();
   for (const { start, end } of calByService.values()) {
     const cur  = new Date(Math.max(start.getTime(), WINDOW_START.getTime()));
     const stop = new Date(Math.min(end.getTime(),   WINDOW_END.getTime()));
     while (cur <= stop) {
-      allDates.add(cur.getFullYear()
-        + String(cur.getMonth()+1).padStart(2,'0')
-        + String(cur.getDate()).padStart(2,'0'));
+      allDates.add(cur.getFullYear()+String(cur.getMonth()+1).padStart(2,'0')+String(cur.getDate()).padStart(2,'0'));
       cur.setDate(cur.getDate()+1);
     }
   }
-  for (const d of cdByDate.keys()) {
-    if (gtfsDateInWindow(d)) allDates.add(d);
-  }
+  for (const d of cdByDate.keys()) allDates.add(d);
+
   const index = {};
   for (const gtfsDate of allDates) {
     const { date, dow } = parseGTFSDate(gtfsDate);
@@ -211,50 +273,6 @@ function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
     index[iso] = [...active].map(s => prefix + ':' + s);
   }
   return index;
-}
-
-// Retourne le Set des service_ids actifs dans la fenêtre (sans préfixe opérateur)
-function activeServiceIdsInWindow(calendarRows, calendarDatesRows) {
-  const active = new Set();
-  const calByService = new Map();
-  for (const row of calendarRows) {
-    calByService.set(row.service_id, {
-      start: parseGTFSDate(row.start_date).date,
-      end:   parseGTFSDate(row.end_date).date,
-      dow:   DOW_KEYS.map(k => row[k] === '1'),
-    });
-  }
-  const cdByDate = new Map();
-  for (const row of calendarDatesRows) {
-    const d = row.date.trim();
-    if (!cdByDate.has(d)) cdByDate.set(d, []);
-    cdByDate.get(d).push({ sid: row.service_id, type: row.exception_type });
-  }
-  // Parcourir la fenêtre jour par jour
-  const cur = new Date(WINDOW_START);
-  while (cur <= WINDOW_END) {
-    const { date, dow } = parseGTFSDate(
-      cur.getFullYear() + String(cur.getMonth()+1).padStart(2,'0') + String(cur.getDate()).padStart(2,'0')
-    );
-    const gtfsDate = cur.getFullYear()
-      + String(cur.getMonth()+1).padStart(2,'0')
-      + String(cur.getDate()).padStart(2,'0');
-    for (const [sid, cal] of calByService) {
-      if (date >= cal.start && date <= cal.end && cal.dow[dow]) active.add(sid);
-    }
-    for (const { sid, type } of (cdByDate.get(gtfsDate) || [])) {
-      if (type === '1') active.add(sid); else if (type === '2') active.delete(sid);
-    }
-    cur.setDate(cur.getDate()+1);
-  }
-  // calendar_dates: ajouts sans entrée calendar
-  for (const [d, overrides] of cdByDate) {
-    if (!gtfsDateInWindow(d)) continue;
-    for (const { sid, type } of overrides) {
-      if (type === '1') active.add(sid);
-    }
-  }
-  return active;
 }
 
 // ─── Détection du type de train ───────────────────────────────────────────────
@@ -488,117 +506,104 @@ async function ingestOperator(op) {
     return null;
   }
 
-  // ── Étape 1 : fichiers légers en mémoire (pas stop_times) ──────────────────
-  const [tripsRaw, stopsRaw, routesRawAll, calendarRaw, calendarDatesRaw] = await Promise.all([
-    readCSV(path.join(gtfs_dir, 'trips.txt')),
-    readCSV(path.join(gtfs_dir, 'stops.txt')),
-    readCSV(path.join(gtfs_dir, 'routes.txt')),
-    readCSV(path.join(gtfs_dir, 'calendar.txt')),
-    readCSV(path.join(gtfs_dir, 'calendar_dates.txt')),
-  ]);
-
-  console.log(`    trips brut      : ${tripsRaw.length.toLocaleString()}`);
+  // ── Étape 1 : routes ────────────────────────────────────────────────────────
+  const routesRawAll = await readCSV(path.join(gtfs_dir, 'routes.txt'));
   console.log(`    routes brut     : ${routesRawAll.length.toLocaleString()}`);
-
-  // ── Filtre routes : longue distance uniquement ──
-  const routesRaw = routesRawAll.filter(r => shouldKeepRoute(operatorId, r));
+  const routesRaw    = routesRawAll.filter(r => shouldKeepRoute(operatorId, r));
   console.log(`    routes gardées  : ${routesRaw.length.toLocaleString()} (filtre longue distance)`);
   const keptRouteIds = new Set(routesRaw.map(r => r.route_id));
-
-  // ── Étape 2 : service_ids actifs dans la fenêtre → filtre trips AVANT stop_times
-  const windowServiceIds = activeServiceIdsInWindow(calendarRaw, calendarDatesRaw);
-
-  // ── Calendrier ──
-  const calendarIndex = buildCalendarIndex(calendarRaw, calendarDatesRaw, operatorId);
-  console.log(`    dates GTFS      : ${Object.keys(calendarIndex).length}`);
-
-  // ── Routes ──
   const routeInfo    = {};
   const routeTypeMap = {};
   for (const r of routesRaw) {
-    routeInfo[P(r.route_id)] = {
-      short:    r.route_short_name || '',
-      long:     r.route_long_name  || '',
-      type:     parseInt(r.route_type) || 0,
-      operator: operatorId,
-    };
+    routeInfo[P(r.route_id)] = { short: r.route_short_name||'', long: r.route_long_name||'',
+      type: parseInt(r.route_type)||0, operator: operatorId };
     routeTypeMap[r.route_id] = r.route_short_name || '';
   }
 
-  // ── Trips : seulement route gardée + service actif dans la fenêtre ──────────
+  // ── Étape 2 : calendar (petit) + service_ids actifs dans la fenêtre ─────────
+  const calendarRaw      = await readCSV(path.join(gtfs_dir, 'calendar.txt'));
+  const calendarDatesRaw = await readCSV(path.join(gtfs_dir, 'calendar_dates.txt'));
+  const windowServiceIds = activeServiceIdsInWindow(calendarRaw, calendarDatesRaw);
+  const calendarIndex    = buildCalendarIndex(calendarRaw, calendarDatesRaw, operatorId);
+  console.log(`    dates GTFS      : ${Object.keys(calendarIndex).length}`);
+
+  // ── Étape 3 : trips streamé — filtre route + service actif ──────────────────
   const tripToService  = {};
   const tripToRoute    = {};
   const tripToHeadsign = {};
-  for (const t of tripsRaw) {
-    if (!keptRouteIds.has(t.route_id)) continue;
-    if (!windowServiceIds.has(t.service_id)) continue; // ← filtre fenêtre
-    tripToService[t.trip_id]  = P(t.service_id);
-    tripToRoute[t.trip_id]    = P(t.route_id);
-    tripToHeadsign[t.trip_id] = t.trip_headsign || '';
-  }
+  await streamCSV(path.join(gtfs_dir, 'trips.txt'), (row) => {
+    if (!keptRouteIds.has(row.route_id)) return false;
+    if (!windowServiceIds.has(row.service_id)) return false;
+    tripToService[row.trip_id]  = P(row.service_id);
+    tripToRoute[row.trip_id]    = P(row.route_id);
+    tripToHeadsign[row.trip_id] = row.trip_headsign || '';
+    return false;
+  });
   const validTripIds = new Set(Object.keys(tripToRoute));
   console.log(`    trips gardés    : ${validTripIds.size.toLocaleString()}`);
 
   if (!validTripIds.size) {
-    console.warn(`    ⚠  Aucun trip actif dans la fenêtre — opérateur ignoré`);
+    console.warn(`    ⚠  Aucun trip actif dans la fenêtre`);
     return null;
   }
 
-  // ── Étape 3 : stop_times streamé — jamais chargé entièrement en RAM ─────────
-  // On ne garde en mémoire QUE les stop_times des trips actifs.
+  // ── Étape 4 : stop_times streamé — filtre sur trip actif ────────────────────
   const usedStopIds = new Set();
   const tripStops   = {};
-
   await new Promise((resolve, reject) => {
     const stFile = path.join(gtfs_dir, 'stop_times.txt');
-    if (!fs.existsSync(stFile)) {
-      console.warn('    ⚠  Manquant : stop_times.txt');
-      return resolve();
-    }
-    let headers = null; let lineCount = 0;
+    if (!fs.existsSync(stFile)) { console.warn('    ⚠  Manquant : stop_times.txt'); return resolve(); }
+    let headers = null; let totalLines = 0;
+    let iTrip = -1, iStop = -1, iSeq = -1, iDep = -1, iArr = -1;
     const rl = readline.createInterface({
-      input: fs.createReadStream(stFile, { encoding: 'utf8', highWaterMark: 512 * 1024 }),
+      input: fs.createReadStream(stFile, { encoding: 'utf8', highWaterMark: 512*1024 }),
       crlfDelay: Infinity,
     });
     rl.on('line', (raw) => {
-      const line = raw.replace(/^﻿/, '').trim();
+      const line = raw.replace(/^\uFEFF/,'').trim();
       if (!line) return;
-      lineCount++;
+      totalLines++;
       const cols = parseCSVLine(line);
-      if (!headers) { headers = cols; return; }
-      const trip_id = cols[headers.indexOf('trip_id')]?.trim();
-      if (!trip_id || !validTripIds.has(trip_id)) return; // ← filtre immédiat
-      const stop_id  = cols[headers.indexOf('stop_id')]?.trim();
-      const seq      = cols[headers.indexOf('stop_sequence')]?.trim();
-      const dep      = cols[headers.indexOf('departure_time')]?.trim();
-      const arr      = cols[headers.indexOf('arrival_time')]?.trim();
+      if (!headers) {
+        headers = cols;
+        iTrip = cols.indexOf('trip_id');
+        iStop = cols.indexOf('stop_id');
+        iSeq  = cols.indexOf('stop_sequence');
+        iDep  = cols.indexOf('departure_time');
+        iArr  = cols.indexOf('arrival_time');
+        return;
+      }
+      const trip_id = cols[iTrip]?.trim();
+      if (!trip_id || !validTripIds.has(trip_id)) return;
+      const stop_id = cols[iStop]?.trim();
       usedStopIds.add(stop_id);
       if (!tripStops[trip_id]) tripStops[trip_id] = [];
       tripStops[trip_id].push({
-        seq:      parseInt(seq) || 0,
+        seq:      parseInt(cols[iSeq]) || 0,
         stop_id:  P(stop_id),
-        dep_time: timeToSeconds(dep),
-        arr_time: timeToSeconds(arr),
+        dep_time: timeToSeconds(cols[iDep]?.trim()),
+        arr_time: timeToSeconds(cols[iArr]?.trim()),
       });
     });
-    rl.on('close', () => { console.log(`    stop_times lus  : ${lineCount.toLocaleString()}`); resolve(); });
+    rl.on('close', () => { console.log(`    stop_times lus  : ${totalLines.toLocaleString()}`); resolve(); });
     rl.on('error', reject);
   });
 
-  // ── Stops : uniquement ceux utilisés ──
+  // ── Étape 5 : stops streamé — uniquement les stop_ids utilisés ──────────────
   const stopsDict = {};
-  for (const s of stopsRaw) {
-    if (!usedStopIds.has(s.stop_id)) continue;
-    stopsDict[P(s.stop_id)] = {
-      name:           s.stop_name || s.stop_id,
-      lat:            parseFloat(s.stop_lat)  || 0,
-      lon:            parseFloat(s.stop_lon)  || 0,
+  await streamCSV(path.join(gtfs_dir, 'stops.txt'), (row) => {
+    if (!usedStopIds.has(row.stop_id) && row.location_type !== '1') return false;
+    stopsDict[P(row.stop_id)] = {
+      name:           row.stop_name || row.stop_id,
+      lat:            parseFloat(row.stop_lat)  || 0,
+      lon:            parseFloat(row.stop_lon)  || 0,
       operator:       operatorId,
-      code:           s.stop_code ? s.stop_code.trim().toUpperCase() : undefined,
-      parent_station: s.parent_station ? P(s.parent_station) : null,
+      code:           row.stop_code ? row.stop_code.trim().toUpperCase() : undefined,
+      parent_station: row.parent_station ? P(row.parent_station) : null,
     };
-  }
-  console.log(`    stops gardés    : ${Object.keys(stopsDict).length.toLocaleString()}`);
+    return false;
+  });
+  console.log(`    stops gardés    : ${Object.keys(stopsDict).length.toLocaleString()}`)
 
   // ── FIX : correction des trips circulaires (TI) ──
   for (const [trip_id, stops] of Object.entries(tripStops)) {
