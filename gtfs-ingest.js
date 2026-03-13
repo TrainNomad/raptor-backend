@@ -678,11 +678,10 @@ async function ingestOperator(op) {
     }
     if (!routeTrips[route_id]) routeTrips[route_id] = [];
 
-    const trainType = detectTrainType(operatorId, stops[0]?.stop_id || '', trip_id, routeShort, agencyCode);
-    const firstDep  = stops.find(s => s.dep_time !== null)?.dep_time ?? Infinity;
-
     const rawRoute   = route_id.replace(operatorId + ':', '');
     const agencyCode = routeAgency[rawRoute] || operatorId;
+    const trainType  = detectTrainType(operatorId, stops[0]?.stop_id || '', trip_id, routeShort, agencyCode);
+    const firstDep   = stops.find(s => s.dep_time !== null)?.dep_time ?? Infinity;
     routeTrips[route_id].push({
       trip_id:        P(trip_id),
       service_id,
