@@ -277,7 +277,7 @@ function buildCalendarIndex(calendarRows, calendarDatesRows, prefix) {
 
 // ─── Détection du type de train ───────────────────────────────────────────────
 
-function detectTrainType(operatorId, stopId, tripId, routeShort) {
+function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
   const tid = (tripId || '').toUpperCase();
 
   switch (operatorId) {
@@ -356,16 +356,23 @@ function detectTrainType(operatorId, stopId, tripId, routeShort) {
     }
 
     case 'UK': {
-      // VT = Avanti West Coast, CS = Caledonian Sleeper
-      // Le trip_id UK commence souvent par le code agence (ex: VT12345, CS98765)
-      const prefix = (tripId || '').substring(0, 2).toUpperCase();
-      if (prefix === 'VT') return 'AVANTI';
-      if (prefix === 'CS') return 'CALEDONIAN_SLEEPER';
-      // Fallback sur route_short_name si le trip_id ne commence pas par le code
-      const rs = (routeShort || '').toLowerCase();
-      if (rs.includes('avanti') || rs.includes('west coast')) return 'AVANTI';
-      if (rs.includes('caledonian') || rs.includes('sleeper'))  return 'CALEDONIAN_SLEEPER';
-      return 'UK_RAIL';
+      // Utiliser agency_code (depuis routes.txt) — fiable et direct
+      // Fallback sur le préfixe du trip_id si agencyCode absent
+      const agency = (agencyCode || (tripId || '').substring(0, 2)).toUpperCase();
+      switch (agency) {
+        case 'VT': return 'AVANTI';           // Avanti West Coast
+        case 'GR': return 'LNER';             // London North Eastern Railway
+        case 'CS': return 'CALEDONIAN_SLEEPER'; // Caledonian Sleeper
+        case 'XC': return 'CROSSCOUNTRY';     // CrossCountry
+        case 'TP': return 'TPE';              // TransPennine Express
+        case 'EM': return 'EMR';              // East Midlands Railway
+        case 'GW': return 'GWR';              // Great Western Railway
+        case 'SW': return 'SWR';              // South Western Railway
+        case 'HT': return 'HULL_TRAINS';      // Hull Trains
+        case 'GC': return 'GRAND_CENTRAL';    // Grand Central
+        case 'LD': return 'LUMO';             // Lumo
+        default:   return 'UK_RAIL';
+      }
     }
 
     default:
@@ -514,10 +521,18 @@ async function ingestOperator(op) {
   const keptRouteIds = new Set(routesRaw.map(r => r.route_id));
   const routeInfo    = {};
   const routeTypeMap = {};
+  const routeAgency  = {}; // route_id → agency_id (ex: 'VT', 'GR', 'XC'...)
   for (const r of routesRaw) {
-    routeInfo[P(r.route_id)] = { short: r.route_short_name||'', long: r.route_long_name||'',
-      type: parseInt(r.route_type)||0, operator: operatorId };
+    const agencyCode = r.agency_id ? r.agency_id.trim() : operatorId;
+    routeInfo[P(r.route_id)] = {
+      short:       r.route_short_name || '',
+      long:        r.route_long_name  || '',
+      type:        parseInt(r.route_type) || 0,
+      operator:    operatorId,
+      agency_code: agencyCode,          // ex: 'VT', 'GR', 'XC' pour UK
+    };
     routeTypeMap[r.route_id] = r.route_short_name || '';
+    routeAgency[r.route_id]  = agencyCode;
   }
 
   // ── Étape 2 : calendar (petit) + service_ids actifs dans la fenêtre ─────────
@@ -663,15 +678,18 @@ async function ingestOperator(op) {
     }
     if (!routeTrips[route_id]) routeTrips[route_id] = [];
 
-    const trainType = detectTrainType(operatorId, stops[0]?.stop_id || '', trip_id, routeShort);
+    const trainType = detectTrainType(operatorId, stops[0]?.stop_id || '', trip_id, routeShort, agencyCode);
     const firstDep  = stops.find(s => s.dep_time !== null)?.dep_time ?? Infinity;
 
+    const rawRoute   = route_id.replace(operatorId + ':', '');
+    const agencyCode = routeAgency[rawRoute] || operatorId;
     routeTrips[route_id].push({
       trip_id:        P(trip_id),
       service_id,
       dep_time_first: firstDep,
       train_type:     trainType,
       operator:       operatorId,
+      agency_code:    agencyCode,  // ex: 'VT', 'GR', 'XC' — utilisé par le frontend pour les logos
       stop_times:     stops,
     });
 
@@ -817,6 +835,16 @@ async function main() {
     const size = (fs.statSync(p).size / 1024 / 1024).toFixed(2);
     console.log(`  ✓ ${filename.padEnd(26)} ${size} MB`);
   };
+
+  // Copier operators_meta.json dans engine_data pour le frontend
+  const metaSrc = path.join(__dirname, 'operators_meta.json');
+  const metaDst = path.join(OUT_DIR, 'operators_meta.json');
+  if (fs.existsSync(metaSrc)) {
+    fs.copyFileSync(metaSrc, metaDst);
+    console.log('  ✓ operators_meta.json copié');
+  } else {
+    console.warn('  ⚠  operators_meta.json introuvable à la racine');
+  }
 
   writeJSON('stops.json',          merged.stopsDict);
   writeJSON('routes_info.json',    merged.routeInfo);
