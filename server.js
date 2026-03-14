@@ -1024,7 +1024,7 @@ const server = http.createServer(async (req, res) => {
     const startSec = timeToSeconds(q.time || '07:00');
     const reached  = raptorExplore(uniqueFrom, startSec, stt, dateStr, extraOrigins);
 
-    // Enrichissement coordonnées GPS
+    // ── Étape 1 : meilleur trajet par stop_id ──────────────────────────────
     const bestByStop = {};
     for (const r of reached) {
       const sid = r.stop_id;
@@ -1034,25 +1034,40 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const journeys = [];
+    // ── Étape 2 : consolider par coordonnées GPS arrondies ───────────────
+    // Plusieurs stop_ids peuvent pointer sur la même gare physique (quais, opérateurs).
+    // On arrondit lat/lon à 3 décimales (~100 m) et on ne garde que le trajet le plus court.
+    // Cela réduit drastiquement les doublons (ex: 6× St Pancras → 1 point).
+    const bestByGeo = {};
     for (const [sid, r] of Object.entries(bestByStop)) {
-      const coords  = globalCoordsMap.get(sid);
+      const coords = globalCoordsMap.get(sid);
       const lat = coords?.lat || null;
       const lon = coords?.lon || null;
-      if (!lat || !lon) continue;  // on ignore les stops sans coords (pas affichables)
-      journeys.push({
-        dep_time:  r.dep_time,
-        arr_time:  r.arr_time,
-        dep_str:   r.dep_str,
-        arr_str:   r.arr_str,
-        duration:  r.duration,
-        transfers: r.transfers,
-        dest_lat:  lat,
-        dest_lon:  lon,
-        // Nom de la destination pour l'UI
-        legs: [{ to_id: sid, to_name: cleanStopName(sid) }],
-      });
+      if (!lat || !lon) continue;
+
+      // Clé géographique arrondie à ~100 m
+      const geoKey = lat.toFixed(3) + ':' + lon.toFixed(3);
+
+      if (!bestByGeo[geoKey] || r.duration < bestByGeo[geoKey].duration) {
+        bestByGeo[geoKey] = { ...r, lat, lon, sid,
+          // Préférer le nom de station groupée (stopStationMap) plutôt que le stop brut
+          name: stopStationMap.get(sid) || cleanStopName(sid)
+        };
+      }
     }
+
+    // ── Étape 3 : construire la réponse ──────────────────────────────────
+    const journeys = Object.values(bestByGeo).map(r => ({
+      dep_time:  r.dep_time,
+      arr_time:  r.arr_time,
+      dep_str:   r.dep_str,
+      arr_str:   r.arr_str,
+      duration:  r.duration,
+      transfers: r.transfers,
+      dest_lat:  r.lat,
+      dest_lon:  r.lon,
+      legs: [{ to_id: r.sid, to_name: r.name }],
+    }));
 
     console.log(`  → ${journeys.length} destinations | ${Date.now()-t0}ms`);
     return jsonResp(res, { journeys, computed_ms: Date.now()-t0 });
