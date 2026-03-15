@@ -198,16 +198,8 @@ function transferEntries(stopId) {
 }
 
 function transferTime(fromId, toEntry) {
+  if (toEntry.interCity) return MIN_TRANSFER_CITY;
   const sameOp = extractOperator(fromId) === extractOperator(toEntry.id);
-
-  if (toEntry.interCity) {
-    // Changement de gare dans la même ville :
-    // si en plus c'est inter-opérateurs, on cumule les deux pénalités
-    return sameOp
-      ? MIN_TRANSFER_CITY
-      : MIN_TRANSFER_CITY + MIN_TRANSFER_CROSS;  // ex: 60 + 20 = 80 min
-  }
-
   return sameOp ? MIN_TRANSFER_SAME : MIN_TRANSFER_CROSS;
 }
 
@@ -453,12 +445,13 @@ function buildStopToTrips(tripsData) {
   return index;
 }
 
-function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
-  let boarded  = false;
+function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO, originSet) {
+  let boarded   = false;
   let boardStop = null;
   let boardDep  = null;
 
-  const isTI = trip.operator === 'TI';
+  const isTI      = trip.operator === 'TI';
+  const tripOp    = trip.operator || 'SNCF';
 
   for (let i = fromIdx; i < trip.stop_times.length; i++) {
     const st  = trip.stop_times[i];
@@ -469,10 +462,23 @@ function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
       if (tau !== undefined) {
         const rawDep = st.dep_time ?? st.arr_time;
         const dep = (isTI && rawDep != null) ? tiAdjust(rawDep, dateISO) : rawDep;
-        if (dep != null && dep >= tau) {
-          boarded   = true;
-          boardStop = sid;
-          boardDep  = dep;
+        if (dep != null) {
+          // Temps minimum avant d'embarquer :
+          // - 0 si c'est une origine de départ (pas une correspondance)
+          // - MIN_TRANSFER_SAME si même opérateur
+          // - MIN_TRANSFER_CROSS si inter-opérateurs
+          const isOrigin   = originSet ? originSet.has(sid) : false;
+          const prevOp     = parent[sid]?.operator || extractOperator(sid);
+          const sameOp     = prevOp === tripOp;
+          const minWait    = isOrigin ? 0
+                           : sameOp  ? MIN_TRANSFER_SAME
+                           :           MIN_TRANSFER_CROSS;
+
+          if (dep >= tau + minWait) {
+            boarded   = true;
+            boardStop = sid;
+            boardDep  = dep;
+          }
         }
       }
       continue;
@@ -492,7 +498,7 @@ function scanTrip(trip, fromIdx, tauBest, tau_cur, parent, routeId, dateISO) {
         dep_time:   boardDep,
         arr_time:   arr,
         train_type: trip.train_type || null,
-        operator:   trip.operator   || null,
+        operator:   tripOp,
       };
     }
   }
@@ -539,7 +545,7 @@ function raptorCore(originIds, destIds, startTime, stopToTripsData, dateISO, ext
 
     for (const stop of marked) {
       for (const { routeId, trip, idx } of (stopToTripsData[stop] || [])) {
-        scanTrip(trip, idx, tau_best, tau_cur, parent, routeId, dateISO);
+        scanTrip(trip, idx, tau_best, tau_cur, parent, routeId, dateISO, originSet);
       }
     }
 
@@ -648,7 +654,14 @@ function raptorExplore(originIds, startTime, stopToTripsData, dateISO, extraOrig
               let rawDep = st.dep_time ?? st.arr_time;
               if (rawDep == null) continue;
               if (tripIsTI) rawDep = tiAdjust(rawDep, dateISO);
-              if (rawDep >= t) {
+              // Temps minimum de correspondance avant embarquement
+          const isOrig  = originSet.has(sid);
+          const prevOp2 = (sid||'').startsWith('TI:') ? 'TI' : 'SNCF';
+          const tripOp2 = tripIsTI ? 'TI' : 'SNCF';
+          const minW    = isOrig ? 0
+                        : prevOp2 === tripOp2 ? MIN_TRANSFER_SAME
+                        :                       MIN_TRANSFER_CROSS;
+          if (rawDep >= t + minW) {
                 boarded  = true;
                 boardDep = rawDep;
                 boardTau = t;
