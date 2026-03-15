@@ -198,8 +198,16 @@ function transferEntries(stopId) {
 }
 
 function transferTime(fromId, toEntry) {
-  if (toEntry.interCity) return MIN_TRANSFER_CITY;
   const sameOp = extractOperator(fromId) === extractOperator(toEntry.id);
+
+  if (toEntry.interCity) {
+    // Changement de gare dans la même ville :
+    // si en plus c'est inter-opérateurs, on cumule les deux pénalités
+    return sameOp
+      ? MIN_TRANSFER_CITY
+      : MIN_TRANSFER_CITY + MIN_TRANSFER_CROSS;  // ex: 60 + 20 = 80 min
+  }
+
   return sameOp ? MIN_TRANSFER_SAME : MIN_TRANSFER_CROSS;
 }
 
