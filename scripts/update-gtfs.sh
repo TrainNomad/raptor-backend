@@ -118,7 +118,27 @@ function downloadNAP(op) {
 ENDNODE
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PARTIE 3 — Ingestion RAPTOR + index stations
+#  PARTIE 3 — Allemagne : téléchargement + filtrage (S-Bahn urbains exclus)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement Allemagne Fernverkehr (ICE · IC · EC · NJ)..."
+mkdir -p ./gtfs/db_fv
+curl -L -s \
+  "https://download.gtfs.de/germany/fv_free/latest.zip" \
+  -o /tmp/gtfs_db_fv.zip
+unzip -o /tmp/gtfs_db_fv.zip -d ./gtfs/db_fv > /dev/null
+
+echo "📥 Téléchargement Allemagne Régional (RE · RB · IRE)..."
+mkdir -p ./gtfs/db_rv
+curl -L -s \
+  "https://download.gtfs.de/germany/rv_free/latest.zip" \
+  -o /tmp/gtfs_db_rv.zip
+unzip -o /tmp/gtfs_db_rv.zip -d ./gtfs/db_rv > /dev/null
+
+echo "⚙️  Filtrage Allemagne (exclusion S-Bahn urbains)..."
+node filter_germany.js
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 4 — Ingestion RAPTOR + index stations
 # ─────────────────────────────────────────────────────────────────────────────
 echo "⚙️  Ingestion GTFS -> engine_data..."
 node gtfs-ingest.js
