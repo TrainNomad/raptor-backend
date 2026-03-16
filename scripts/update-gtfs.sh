@@ -6,7 +6,8 @@ set -e
 #  Télécharge, dézippe et filtre tous les GTFS, puis lance l'ingestion.
 #
 #  Dépendances (même dossier) :
-#    filter_avanti.js        — filtre les données UK Rail → Avanti Only
+#    filter_avanti.js        — filtre les données UK Rail → UK National
+#    filter_germany.js       — filtre Allemagne FV (ICE · IC · EC · NJ)
 #    gtfs-ingest.js          — ingestion RAPTOR multi-opérateurs
 #    build-stations-index.js — index des stations
 #    operators.json          — liste des opérateurs
@@ -97,8 +98,8 @@ function downloadNAP(op) {
 
 // ─── Boucle principale ────────────────────────────────────────────────────────
 (async function() {
-  // Ignorer UK/Avanti : déjà téléchargé et filtré en Partie 1
-  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI');
+  // Ignorer UK (Partie 1) et DB_FV (Partie 3 — download séparé)
+  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI' && op.id !== 'DB_FV' && op.id !== 'DB_RV');
 
   for (const op of filtered) {
     try {
@@ -118,7 +119,7 @@ function downloadNAP(op) {
 ENDNODE
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PARTIE 3 — Allemagne : téléchargement + filtrage (S-Bahn urbains exclus)
+#  PARTIE 3 — Allemagne Fernverkehr (ICE · IC · EC · NJ)
 # ─────────────────────────────────────────────────────────────────────────────
 echo "📥 Téléchargement Allemagne Fernverkehr (ICE · IC · EC · NJ)..."
 mkdir -p ./gtfs/db_fv
@@ -127,14 +128,7 @@ curl -L -s \
   -o /tmp/gtfs_db_fv.zip
 unzip -o /tmp/gtfs_db_fv.zip -d ./gtfs/db_fv > /dev/null
 
-echo "📥 Téléchargement Allemagne Régional (RE · RB · IRE)..."
-mkdir -p ./gtfs/db_rv
-curl -L -s \
-  "https://download.gtfs.de/germany/rv_free/latest.zip" \
-  -o /tmp/gtfs_db_rv.zip
-unzip -o /tmp/gtfs_db_rv.zip -d ./gtfs/db_rv > /dev/null
-
-echo "⚙️  Filtrage Allemagne (exclusion S-Bahn urbains)..."
+echo "⚙️  Filtrage Allemagne FV (exclusion non-ferroviaire)..."
 node filter_germany.js
 
 # ─────────────────────────────────────────────────────────────────────────────

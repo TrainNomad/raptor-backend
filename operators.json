@@ -54,14 +54,6 @@
     "note": "Fernverkehr DB — ICE (grande vitesse), IC (Intercity), EC (EuroCity intercontinental), NJ (Nightjet, trains de nuit). Couvre tout le réseau grande vitesse allemand + liaisons Austria/Suisse/NL/BE/FR/DK. Source : gtfs.de (données DELFI/DB officiel, mises à jour quotidiennement). Filtré via filter_germany.js."
   },
   {
-    "id": "DB_RV",
-    "name": "Allemagne Régional (RE · RB · IRE)",
-    "gtfs_dir": "./gtfs/db_rv_filtered",
-    "gtfs_download_dir": "./gtfs/db_rv",
-    "gtfs_url": "https://download.gtfs.de/germany/rv_free/latest.zip",
-    "note": "Regionalverkehr Allemagne — RE (RegionalExpress), RB (RegionalBahn), IRE (InterRegioExpress). S-Bahn urbains (Berlin, München, Hamburg, Frankfurt, Stuttgart, Rhein-Ruhr…) exclus via filter_germany.js (route_type 109 + agences S-Bahn). Inclut opérateurs privés régionaux (Abellio, Transdev, Go-Ahead…). Source : gtfs.de (DELFI officiel)."
-  },
-  {
     "id": "UK",
     "name": "UK National (Avanti · LNER · ScotRail · CrossCountry · GWR · EMR · Northern · TfW · Lumo…)",
     "gtfs_dir": "./gtfs/UK_National"

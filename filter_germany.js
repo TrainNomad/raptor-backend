@@ -41,36 +41,15 @@ const FEEDS = [
     label:      'Fernverkehr (ICE · IC · EC · NJ)',
     source_dir: './gtfs/db_fv',
     target_dir: './gtfs/db_fv_filtered',
-    // En FV, tout est longue distance — on ne filtre que les types non-ferroviaires
     excluded_types: new Set([400, 401, 700, 900]),
-    exclude_sbahn_agencies: false,   // Aucun S-Bahn dans le feed FV
-  },
-  {
-    id:         'DB_RV',
-    label:      'Regionalverkehr (RE · RB · IRE)',
-    source_dir: './gtfs/db_rv',
-    target_dir: './gtfs/db_rv_filtered',
-    // Exclure S-Bahn (109), urbain (400/401), et tout ce qui n'est pas ferroviaire
-    excluded_types: new Set([109, 400, 401, 700, 900]),
-    exclude_sbahn_agencies: true,
+    exclude_sbahn_agencies: false,
   },
 ];
 
-// ─── Flags ────────────────────────────────────────────────────────────────────
-
-// Conserver les RB (RegionalBahn — omnibus locaux, toutes gares) ?
-// false = les exclure : réduit le feed rv de ~70% — recommandé pour moteur national.
-// Les RE + IRE suffisent pour les correspondances interrégionales.
-// Mettre à true uniquement si vous avez besoin des petites lignes locales.
-const KEEP_RB = false;
-if (!KEEP_RB) {
-  FEEDS.find(f => f.id === 'DB_RV').excluded_types.add(106);  // RegionalBahn
-}
-
-// Conserver les trains touristiques (Brockenbahn, Rügensche BäderBahn…) ?
+// Conserver les trains touristiques ? (non pertinent pour FV, par sécurité)
 const KEEP_TOURIST = false;
 if (!KEEP_TOURIST) {
-  FEEDS.forEach(f => f.excluded_types.add(105));  // Tourist Railway
+  FEEDS.forEach(f => f.excluded_types.add(105));
 }
 
 // Types ferroviaires acceptés (whitelist de sécurité)
@@ -258,9 +237,9 @@ async function filterFeed(feed) {
 // ─── Point d'entrée ────────────────────────────────────────────────────────────
 
 (async function main() {
-  console.log('\n🇩🇪  Filtrage GTFS Allemagne');
-  console.log('   Types conservés  : ICE · IC · EC · NJ · IRE · RE' + (KEEP_RB ? ' · RB' : ' (RB exclus)'));
-  console.log('   Types exclus     : S-Bahn urbains · U-Bahn · Bus · Tram' + (!KEEP_RB ? ' · RB (omnibus locaux)' : ''));
+  console.log('\n🇩🇪  Filtrage GTFS Allemagne — Fernverkehr uniquement');
+  console.log('   Types conservés  : ICE · IC · EC · NJ · Flixtrain');
+  console.log('   Types exclus     : non-ferroviaire (bus, tram, métro)');
   if (!KEEP_TOURIST) console.log('   Touristique      : exclus');
 
   for (const feed of FEEDS) {
