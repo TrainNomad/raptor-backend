@@ -3,18 +3,30 @@
  * Extrait les opérateurs longue distance UK depuis le GTFS complet UK Rail.
  * Remplace filter_avanti.js (qui ne gardait que VT = Avanti).
  *
- * Agences conservées (longue distance / intercités uniquement) :
- *   VT  Avanti West Coast     Euston → Glasgow, Manchester, Birmingham
+ * Agences conservées (national & intercités) :
+ *
+ *   — Intercités grande distance —
+ *   VT  Avanti West Coast     Euston → Glasgow, Manchester, Birmingham, Liverpool
  *   GR  LNER                  Kings Cross → Edinburgh, Newcastle, Leeds, York
- *   CS  Caledonian Sleeper    Euston → Inverness, Aberdeen, Fort William
+ *   CS  Caledonian Sleeper    Euston → Inverness, Aberdeen, Fort William (nuit)
  *   XC  CrossCountry          Birmingham → Edinburgh/Glasgow/Bristol/Plymouth
- *   TP  TransPennine Express  Manchester/Liverpool → Edinburgh, Glasgow
+ *   TP  TransPennine Express  Manchester/Liverpool → Edinburgh, Glasgow, Newcastle
  *   EM  East Midlands Railway St Pancras → Nottingham, Sheffield, Leeds, Derby
  *   GW  Great Western Railway Paddington → Bristol, Cardiff, Plymouth, Cornwall
  *   SW  South Western Railway Waterloo → Southampton, Bournemouth, Exeter
  *   HT  Hull Trains           Kings Cross → Hull (open access)
  *   GC  Grand Central         Kings Cross → Sunderland, Bradford (open access)
  *   LD  Lumo                  Kings Cross → Edinburgh (low-cost open access)
+ *
+ *   — Réseaux nationaux régionaux —
+ *   SR  ScotRail              Réseau national écossais (Glasgow, Edinburgh, Inverness…)
+ *   NT  Northern Trains       Nord Angleterre (Manchester, Leeds, Newcastle, Liverpool…)
+ *   AW  Transport for Wales   Réseau national gallois (Cardiff, Swansea, Holyhead…)
+ *
+ *   — Exclus (urbain/banlieue) —
+ *   LT London Underground · XR Elizabeth line · LO London Overground (métro londonien)
+ *   TL Thameslink · GN Great Northern · CC c2c · SN Southern · SE Southeastern (banlieue)
+ *   ME Merseyrail (métro Liverpool) · HX Heathrow Express · GX Gatwick Express · IL Island Line
  *
  * Source : GTFS UK Rail complet (transit.land f-uk~rail)
  * Sortie  : ./gtfs/UK_Intercity/
@@ -25,14 +37,15 @@ const path     = require('path');
 const readline = require('readline');
 
 const SOURCE_DIR = './gtfs/UK_Rail';
-const TARGET_DIR = './gtfs/UK_Intercity';
+const TARGET_DIR = './gtfs/UK_National';
 
-// Agences longue distance conservées
+// Agences nationales conservées (intercités + réseaux nationaux régionaux)
 const TARGET_AGENCIES = new Set([
+  // ── Intercités grande distance ──────────────────────────────────────────
   'VT',  // Avanti West Coast     — Euston → Glasgow, Manchester, Birmingham, Liverpool
-  'GR',  // LNER                  — Kings Cross → Edinburgh, Newcastle, Leeds, York  ← Paris→Edinburgh
+  'GR',  // LNER                  — Kings Cross → Edinburgh, Newcastle, Leeds, York
   'CS',  // Caledonian Sleeper    — Euston → Inverness, Aberdeen, Fort William (nuit)
-  'XC',  // CrossCountry          — Birmingham → Edinburgh/Glasgow/Bristol/Plymouth/Bournemouth
+  'XC',  // CrossCountry          — Birmingham → Edinburgh/Glasgow/Bristol/Plymouth
   'TP',  // TransPennine Express  — Manchester/Liverpool → Edinburgh, Glasgow, Newcastle
   'EM',  // East Midlands Railway — St Pancras → Nottingham, Sheffield, Leeds, Derby
   'GW',  // Great Western Railway — Paddington → Bristol, Cardiff, Plymouth, Cornwall
@@ -40,6 +53,10 @@ const TARGET_AGENCIES = new Set([
   'HT',  // Hull Trains           — Kings Cross → Hull (open access)
   'GC',  // Grand Central         — Kings Cross → Sunderland, Bradford (open access)
   'LD',  // Lumo                  — Kings Cross → Edinburgh (low-cost open access)
+  // ── Réseaux nationaux régionaux ─────────────────────────────────────────
+  'SR',  // ScotRail              — Réseau national écossais (Glasgow, Edinburgh, Inverness, Aberdeen…)
+  'NT',  // Northern Trains       — Nord Angleterre (Manchester, Leeds, Newcastle, Liverpool, Hull…)
+  'AW',  // Transport for Wales   — Réseau national gallois (Cardiff, Swansea, Holyhead…)
 ]);
 
 if (!fs.existsSync(TARGET_DIR)) fs.mkdirSync(TARGET_DIR, { recursive: true });
@@ -84,7 +101,7 @@ function processCSV(srcFile, dstFile, onRow) {
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 async function filterUK() {
-  console.log(`\n⚙️  Filtrage UK longue distance...`);
+  console.log(`\n⚙️  Filtrage UK national & intercités...`);
   console.log(`   Agences : ${[...TARGET_AGENCIES].join(', ')}`);
   console.log(`   Source  : ${SOURCE_DIR}`);
   console.log(`   Cible   : ${TARGET_DIR}\n`);
@@ -165,7 +182,7 @@ async function filterUK() {
     console.log(`  feed_info.txt    : copié`);
   }
 
-  console.log(`\n✅ UK longue distance filtré → ${TARGET_DIR}`);
+  console.log(`\n✅ UK national filtré → ${TARGET_DIR}`);
   console.log(`   ${routeIds.size} routes · ${tripIds.size} trips · ${stopIds.size} arrêts\n`);
 }
 

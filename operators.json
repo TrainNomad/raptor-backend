@@ -47,7 +47,7 @@
   },
   {
     "id": "UK",
-    "name": "UK Longue Distance (Avanti · LNER · CrossCountry · GWR · EMR · Lumo…)",
-    "gtfs_dir": "./gtfs/UK_Intercity"
+    "name": "UK National (Avanti · LNER · ScotRail · CrossCountry · GWR · EMR · Northern · TfW · Lumo…)",
+    "gtfs_dir": "./gtfs/UK_National"
   }
 ]
