@@ -56,8 +56,18 @@ const FEEDS = [
   },
 ];
 
+// ─── Flags ────────────────────────────────────────────────────────────────────
+
+// Conserver les RB (RegionalBahn — omnibus locaux, toutes gares) ?
+// false = les exclure : réduit le feed rv de ~70% — recommandé pour moteur national.
+// Les RE + IRE suffisent pour les correspondances interrégionales.
+// Mettre à true uniquement si vous avez besoin des petites lignes locales.
+const KEEP_RB = false;
+if (!KEEP_RB) {
+  FEEDS.find(f => f.id === 'DB_RV').excluded_types.add(106);  // RegionalBahn
+}
+
 // Conserver les trains touristiques (Brockenbahn, Rügensche BäderBahn…) ?
-// false = les exclure (recommandé pour un moteur de recherche de trajets)
 const KEEP_TOURIST = false;
 if (!KEEP_TOURIST) {
   FEEDS.forEach(f => f.excluded_types.add(105));  // Tourist Railway
@@ -249,8 +259,8 @@ async function filterFeed(feed) {
 
 (async function main() {
   console.log('\n🇩🇪  Filtrage GTFS Allemagne');
-  console.log('   Types conservés  : ICE · IC · EC · NJ · IRE · RE · RB');
-  console.log('   Types exclus     : S-Bahn urbains · U-Bahn · Bus · Tram');
+  console.log('   Types conservés  : ICE · IC · EC · NJ · IRE · RE' + (KEEP_RB ? ' · RB' : ' (RB exclus)'));
+  console.log('   Types exclus     : S-Bahn urbains · U-Bahn · Bus · Tram' + (!KEEP_RB ? ' · RB (omnibus locaux)' : ''));
   if (!KEEP_TOURIST) console.log('   Touristique      : exclus');
 
   for (const feed of FEEDS) {

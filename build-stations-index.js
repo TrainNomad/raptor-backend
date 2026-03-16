@@ -173,6 +173,15 @@ const CITY_PREFIXES = [
   'Bristol','Edinburgh','Glasgow','Cardiff','Nottingham',
   'Newcastle','Leicester','Coventry','Southampton','Portsmouth',
   'Brighton','Reading','Oxford','Cambridge','York','Exeter','Preston',
+  // Écosse
+  'Aberdeen','Inverness','Dundee','Perth','Stirling','Motherwell',
+  'Hamilton','Paisley','Kilmarnock','Ayr','Falkirk','Dunfermline',
+  'Kirkcaldy','Livingston','Cumbernauld','Greenock','Fort William',
+  // Pays de Galles
+  'Swansea','Newport','Wrexham','Bangor','Holyhead','Aberystwyth',
+  'Carmarthen','Llandudno','Rhyl','Bridgend','Merthyr Tydfil',
+  // Irlande du Nord
+  'Belfast',
 ];
 function extractCity(name) {
   const normalized = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -437,15 +446,29 @@ const CRS_NAMES = {
   'LST':'London Liverpool Street','LBG':'London Bridge',
   'MYB':'London Marylebone','CHX':'London Charing Cross',
   'CST':'London Cannon Street','FST':'London Fenchurch Street','BFR':'London Blackfriars',
-  // Reste UK
+  // Reste UK — grandes villes anglaises
   'MAN':'Manchester Piccadilly','MCV':'Manchester Piccadilly',
   'BHM':'Birmingham New Street','GLC':'Glasgow Central',
-  'EDB':'Edinburgh','LIV':'Liverpool Lime Street',
+  'EDB':'Edinburgh Waverley','LIV':'Liverpool Lime Street',
   'BHI':'Birmingham International','COV':'Coventry','WFJ':'Wolverhampton',
   'MKC':'Milton Keynes Central','RUG':'Rugby','LMS':'Lancaster',
   'PRE':'Preston','CRE':'Crewe','STA':'Stoke-on-Trent',
   'SPT':'Stockport','OXF':'Oxford','RDG':'Reading',
   'BRI':'Bristol Temple Meads','CTR':'Chester','CAR':'Carlisle',
+  // Écosse
+  'ABD':'Aberdeen','INV':'Inverness','DEE':'Dundee','PTH':'Perth',
+  'STG':'Stirling','AYR':'Ayr','KLD':'Kilmarnock','FLK':'Falkirk',
+  'DFR':'Dunfermline','KDY':'Kirkcaldy','GRK':'Greenock Central',
+  'MLG':'Glasgow Queen Street','PAI':'Paisley Canal',
+  'FWI':'Fort William','OBN':'Oban','KYL':'Kyle of Lochalsh',
+  'WIC':'Wick','THB':'Thurso',
+  // Pays de Galles
+  'CDF':'Cardiff Central','SWA':'Swansea','NWP':'Newport',
+  'WRX':'Wrexham General','BNG':'Bangor','HHD':'Holyhead',
+  'AHV':'Aberystwyth','CMN':'Carmarthen','LLD':'Llandudno',
+  'RHL':'Rhyl','BGD':'Bridgend',
+  // Irlande du Nord
+  'BFT':'Belfast Central','BPT':'Belfast Great Victoria Street',
 };
 function cleanUkName(raw) {
   if (!raw) return raw;
@@ -483,6 +506,39 @@ for (const [sid, stop] of Object.entries(stops)) {
   }
 }
 let nbUkCreated = 0;
+// ── Fusionner ukByName dans ukByCrs quand GPS < 300m (ex: SR + LNER à Edinburgh) ──
+for (const [name, grpName] of ukByName) {
+  if (!grpName.lat || !grpName.lon) continue;
+  let merged = false;
+  for (const [crs, grpCrs] of ukByCrs) {
+    if (!grpCrs.lat || !grpCrs.lon) continue;
+    if (distMeters(grpName.lat, grpName.lon, grpCrs.lat, grpCrs.lon) < 300) {
+      // Même gare physique — absorber les stops de grpName dans grpCrs
+      for (const sid of grpName.stopIds) {
+        if (!grpCrs.stopIds.includes(sid)) grpCrs.stopIds.push(sid);
+      }
+      merged = true;
+      break;
+    }
+  }
+  if (!merged) {
+    // Garder dans ukByName mais vérifier aussi contre d'autres entrées ukByName
+    // (deux opérateurs sans CRS au même endroit)
+    for (const [name2, grp2] of ukByName) {
+      if (name2 === name || !grp2.lat || !grp2.lon) continue;
+      if (distMeters(grpName.lat, grpName.lon, grp2.lat, grp2.lon) < 300) {
+        // Absorber dans le plus grand groupe
+        const target = grpName.stopIds.length >= grp2.stopIds.length ? grpName : grp2;
+        const source = target === grpName ? grp2 : grpName;
+        for (const sid of source.stopIds) {
+          if (!target.stopIds.includes(sid)) target.stopIds.push(sid);
+        }
+        source.stopIds = []; // vider pour éviter double émission
+        break;
+      }
+    }
+  }
+}
 for (const group of [...ukByCrs.values(), ...ukByName.values()]) {
   const unassigned = group.stopIds.filter(s => !assignedStops.has(s));
   if (!unassigned.length) continue;
@@ -852,7 +908,8 @@ const CHECK = [
   'Bruxelles-Midi', 'Amsterdam-Centraal',
   'Madrid Atocha', 'Barcelona Sants', 'Madrid-Chamartín-Clara Campoamor',
   'Lisboa Santa Apolónia', 'Porto Campanhã',
-  'London Euston', 'London St Pancras International', 'Edinburgh',
+  'London Euston', 'London St Pancras International', 'Edinburgh Waverley',
+  'Glasgow Central', 'Aberdeen', 'Inverness', 'Cardiff Central', 'Swansea',
   'Milano Centrale', 'Torino Porta Susa',
 ];
 for (const nom of CHECK) {
