@@ -196,12 +196,15 @@ function extractCity(name) {
 
 // ── Lecture du CSV ────────────────────────────────────────────────────────────
 function parseCsv(filePath) {
-  const lines = fs.readFileSync(filePath, 'utf8').split('\n');
-  const headers = lines[0].split(';');
+  const lines = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').split('\n');
+  // Le fichier est délimité par des virgules — utiliser parseCSVLine qui gère
+  // les champs quotés ET les apostrophes ("Paris Gare de l'Est", "l'Hôpital"…)
+  const headers = parseCSVLine(lines[0]);
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    const vals = lines[i].split(';');
+    const line = lines[i].trim();
+    if (!line) continue;
+    const vals = parseCSVLine(line);
     const obj = {};
     for (let j = 0; j < headers.length; j++) obj[headers[j]] = vals[j] || '';
     rows.push(obj);
