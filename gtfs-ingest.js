@@ -311,14 +311,24 @@ function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
       if (s === 'EC')  return 'EC';
       if (s === 'OTC') return 'THALYS_CORRIDOR';
       if (s === 'IC')  return 'IC_SNCB';
-      return 'TRAIN_SNCB';
+      return 'IC_SNCB'; // fallback SNCB
     }
 
+    case 'DB_FV':
     case 'DB': {
-      if (tid.includes('ICE'))                      return 'ICE';
-      if (tid.includes('IC'))                       return 'IC_DB';
-      if (tid.includes('EC'))                       return 'EC';
-      if (tid.includes('NJ') || tid.includes('NIGHT')) return 'NIGHTJET';
+      // Fernverkehr DB — détection via route_short_name (plus fiable que trip_id)
+      const rs = (routeShort || '').trim().toUpperCase();
+      if (rs === 'ICE' || rs.startsWith('ICE'))            return 'ICE';
+      if (rs === 'IC'  || rs === 'ICN')                    return 'IC_DB';
+      if (rs === 'EC'  || rs === 'ECE')                    return 'EC';
+      if (rs === 'NJ'  || rs === 'EN')                     return 'NIGHTJET';
+      if (rs === 'FLX' || rs.startsWith('FLIXTRAIN'))      return 'FLIXTRAIN';
+      // Fallback sur trip_id si route_short_name absent
+      if (tid.includes('ICE'))                             return 'ICE';
+      if (tid.includes('_IC_') || tid.includes('-IC-'))    return 'IC_DB';
+      if (tid.includes('EC'))                              return 'EC';
+      if (tid.includes('NJ') || tid.includes('NIGHT'))     return 'NIGHTJET';
+      if (tid.includes('FLX') || tid.includes('FLIXTRAIN')) return 'FLIXTRAIN';
       return 'TRAIN_DB';
     }
 
@@ -360,17 +370,21 @@ function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
       // Fallback sur le préfixe du trip_id si agencyCode absent
       const agency = (agencyCode || (tripId || '').substring(0, 2)).toUpperCase();
       switch (agency) {
-        case 'VT': return 'AVANTI';           // Avanti West Coast
-        case 'GR': return 'LNER';             // London North Eastern Railway
-        case 'CS': return 'CALEDONIAN_SLEEPER'; // Caledonian Sleeper
-        case 'XC': return 'CROSSCOUNTRY';     // CrossCountry
-        case 'TP': return 'TPE';              // TransPennine Express
-        case 'EM': return 'EMR';              // East Midlands Railway
-        case 'GW': return 'GWR';              // Great Western Railway
-        case 'SW': return 'SWR';              // South Western Railway
-        case 'HT': return 'HULL_TRAINS';      // Hull Trains
-        case 'GC': return 'GRAND_CENTRAL';    // Grand Central
-        case 'LD': return 'LUMO';             // Lumo
+        case 'VT': return 'AVANTI';              // Avanti West Coast
+        case 'GR': return 'LNER';                // London North Eastern Railway
+        case 'CS': return 'CALEDONIAN_SLEEPER';  // Caledonian Sleeper
+        case 'XC': return 'CROSSCOUNTRY';        // CrossCountry
+        case 'TP': return 'TRANSPENNINE';        // TransPennine Express
+        case 'EM': return 'EMR';                 // East Midlands Railway
+        case 'GW': return 'GWR';                 // Great Western Railway
+        case 'SW': return 'SWR';                 // South Western Railway
+        case 'HT': return 'HULL_TRAINS';         // Hull Trains
+        case 'GC': return 'GRAND_CENTRAL';       // Grand Central
+        case 'LD': return 'LUMO';                // Lumo
+        case 'SR': return 'SCOTRAIL';            // ScotRail
+        case 'NT': return 'NORTHERN';            // Northern Trains
+        case 'AW':
+        case 'TW': return 'TRANSPORT_WALES';     // Transport for Wales
         default:   return 'UK_RAIL';
       }
     }
