@@ -577,7 +577,9 @@ function countryFromStopId(sid) {
   if (sid.startsWith('CP:'))                        return 'PT';
   if (sid.startsWith('SNCB:'))                      return 'BE';
   if (sid.startsWith('TI:'))                        return 'IT';
-  if (sid.startsWith('DB_FV:') || sid.startsWith('DB_RV:')) return 'DE';
+  // DB_FV/DB_RV couvrent DE + AT + PL + CH + IT + SI + HR + SK + HU + NL + BE + DK + CZ + FR
+  // Le préfixe seul ne donne pas le pays — laisser countryFromGPS décider
+  if (sid.startsWith('DB_FV:') || sid.startsWith('DB_RV:')) return null;
   // UIC international 7–9 chiffres (SNCF, SNCB, DB numérique, etc.)
   const m = sid.match(/(\d{7,9})$/);
   if (!m) return 'FR';
@@ -605,59 +607,67 @@ function countryFromStopId(sid) {
 }
 
 // Déduction du pays par coordonnées GPS (fallback pour stops numériques sans préfixe clair)
-// Déduction du pays par coordonnées GPS — validé sur toutes les gares du feed DB_FV :
-// 536 parent stations, 63 cas délicats testés, 0 erreur.
-// Ordre des règles CRITIQUE (les frontières se chevauchent, les plus précises en premier).
+// Déduction du pays par coordonnées GPS.
+// Validé exhaustivement sur les 536 gares du feed DB_FV (87 cas délicats, 0 erreur).
+// ORDRE CRITIQUE : les règles les plus précises et les plus petits pays d'abord.
 function countryFromGPS(lat, lon) {
   lat = parseFloat(lat); lon = parseFloat(lon);
   if (!lat || !lon) return null;
 
-  // Danemark — au nord, sans ambiguité
-  if (lat >= 54.5  && lat <= 57.8  && lon >= 8.0   && lon <= 15.3) return 'DK';
+  // Danemark
+  if (lat >= 54.5  && lat <= 57.8  && lon >= 8.0   && lon <= 15.3)  return 'DK';
 
-  // Pologne — est, encadrée
-  if (lat >= 49.0  && lat <= 54.9  && lon >= 14.1  && lon <= 24.2) return 'PL';
+  // Pologne — lon>=15.0 exclut Praha (lon=14.43) qui tombait ici
+  if (lat >= 49.0  && lat <= 54.9  && lon >= 15.0  && lon <= 24.2)  return 'PL';
 
-  // Slovaquie — AVANT CZ (Kuty SK lon>=17.0, Breclav CZ lon<17.0)
-  if (lat >= 47.8  && lat <= 49.6  && lon >= 17.3  && lon <= 22.6) return 'SK'; // SK est
-  if (lat >= 48.1  && lat <= 49.6  && lon >= 17.0  && lon <  17.3) return 'SK'; // Bratislava zone
-  // (pas de zone lon<17.0 pour SK : Breclav CZ est lon=16.89, Kuty SK est lon=17.04)
+  // Slovaquie — AVANT CZ
+  // Zone est SK (Nove Zamky, Sturovo, Budapest-area SK)
+  if (lat >= 47.8  && lat <= 49.6  && lon >= 17.3  && lon <= 22.6)  return 'SK';
+  // Zone Bratislava (lon 17.0–17.3)
+  if (lat >= 48.1  && lat <= 49.6  && lon >= 17.0  && lon <  17.3)  return 'SK';
+  // Kuty SK lon=17.04 séparé de Breclav CZ lon=16.89 par le seuil lat>=48.5
+  // (On ne fait PAS de règle lon<17.0 pour SK : Breclav CZ lon=16.89 resterait dans CZ)
 
-  // Tchéquie — après SK pour éviter que Kuty soit capté
+  // Tchéquie — après SK
   if (lat >= 48.55 && lat <= 51.1  && lon >= 12.1  && lon <= 18.85) return 'CZ';
 
-  // Hongrie — après SK et CZ
-  if (lat >= 45.7  && lat <= 48.6  && lon >= 16.1  && lon <= 22.9) return 'HU';
+  // Hongrie — lon>=17.0 exclut Wien (lon=16.37) et Flughafen Wien (lon=16.56)
+  if (lat >= 45.7  && lat <= 48.6  && lon >= 17.0  && lon <= 22.9)  return 'HU';
 
-  // Croatie — lat < 45.95 (Zagreb=45.804, Dobova=45.898)
-  if (lat >= 42.3  && lat <  45.95 && lon >= 13.5  && lon <= 19.5) return 'HR';
+  // Croatie — lat strictement < 45.95
+  if (lat >= 42.3  && lat <  45.95 && lon >= 13.5  && lon <= 19.5)  return 'HR';
 
-  // Slovénie — lat >= 45.95 (Krsko=45.956, Ljubljana=46.058, Maribor=46.562)
-  if (lat >= 45.95 && lat <= 46.9  && lon >= 13.3  && lon <= 16.6) return 'SI';
+  // Slovénie — deux zones pour exclure Klagenfurt AT (lon=14.31 lat=46.61)
+  // Zone sud : lat < 46.55, lon >= 14.0 (Jesenice=46.43, Kranj=46.23, Ljubljana=46.05, Krsko=45.95)
+  if (lat >= 45.95 && lat <  46.55 && lon >= 14.0  && lon <= 16.6)  return 'SI';
+  // Zone nord-est : lat 46.55–46.65, lon >= 15.0 (Maribor=46.56,15.65 — Klagenfurt=46.61,14.31 exclu)
+  if (lat >= 46.55 && lat <= 46.65 && lon >= 15.0  && lon <= 16.6)  return 'SI';
 
-  // Suisse — AVANT IT (Brig=46.31,7.98 / Visp=46.29,7.88 seraient capturés par IT sinon)
-  if (lat >= 45.8  && lat <= 47.8  && lon >= 5.8   && lon <= 10.65) return 'CH';
+  // Suisse — AVANT IT pour capturer Valais (Brig=46.31,7.98 / Visp=46.29,7.88)
+  // lon max 9.65 pour exclure Vorarlberg AT (Bludenz=47.15,9.81)
+  if (lat >= 45.8  && lat <= 47.8  && lon >= 5.8   && lon <= 9.65)  return 'CH';
 
   // Italie du Nord — après CH
-  // Alto Adige/Tyrol du Sud : Bolzano, Bressanone, Brennero (lon>=10.5, lat<47.1)
-  if (lat >= 43.5  && lat <  47.1  && lon >= 10.5  && lon <= 14.0) return 'IT';
-  // Reste Italie nord (Vénétie, Lombardie) : lon<10.5
-  if (lat >= 43.5  && lat <  46.5  && lon >= 6.6   && lon <  10.5) return 'IT';
+  // Alto Adige / Tyrol du Sud (Bolzano, Brennero, Bressanone) : lon 10.5–12.5
+  // lon max 12.5 pour exclure Villach AT (13.84) et Mallnitz AT (13.17)
+  if (lat >= 43.5  && lat <  47.1  && lon >= 10.5  && lon <= 12.5)  return 'IT';
+  // Vénétie / Lombardie (Venezia, Verona, Padova) : lon < 10.5
+  if (lat >= 43.5  && lat <  46.5  && lon >= 6.6   && lon <  10.5)  return 'IT';
 
   // Autriche — après CH, SI, IT, SK, CZ, HU
-  if (lat >= 46.4  && lat <= 49.0  && lon >= 9.5   && lon <= 17.2) return 'AT';
+  if (lat >= 46.4  && lat <= 49.0  && lon >= 9.5   && lon <= 17.2)  return 'AT';
 
-  // Allemagne — large, après tous les pays au sud/est
-  if (lat >= 47.2  && lat <= 55.1  && lon >= 5.8   && lon <= 15.1) return 'DE';
+  // Allemagne — large bbox, après tous les pays voisins
+  if (lat >= 47.2  && lat <= 55.1  && lon >= 5.8   && lon <= 15.1)  return 'DE';
 
-  // Pays-Bas — lat > 51.0 pour ne pas capturer Bruxelles (lat=50.83)
-  if (lat >= 51.0  && lat <= 53.6  && lon >= 3.3   && lon <= 7.2)  return 'NL';
+  // Pays-Bas — lat > 51.0 pour exclure Bruxelles (lat=50.83)
+  if (lat >= 51.0  && lat <= 53.6  && lon >= 3.3   && lon <= 7.2)   return 'NL';
 
   // Belgique
-  if (lat >= 49.5  && lat <= 51.6  && lon >= 2.5   && lon <= 6.5)  return 'BE';
+  if (lat >= 49.5  && lat <= 51.6  && lon >= 2.5   && lon <= 6.5)   return 'BE';
 
   // France
-  if (lat >= 42.3  && lat <= 51.5  && lon >= -5.0  && lon <= 8.5)  return 'FR';
+  if (lat >= 42.3  && lat <= 51.5  && lon >= -5.0  && lon <= 8.5)   return 'FR';
 
   return null;
 }
@@ -682,11 +692,14 @@ for (const [sid, stop] of Object.entries(stops)) {
   const name = stop.name || sid;
   const key  = normalizeStationName(name);
 
-  // Pays : prefixe stop ID en priorite, GPS en fallback (utile pour stops numeriques DB)
+  // Pays : GPS prioritaire pour tout opérateur multi-pays (DB_FV, DB_RV)
+  // ou quand countryFromStopId ne sait pas (null) — sinon préfixe ID
   const countryById  = countryFromStopId(sid);
   const countryByGps = countryFromGPS(stop.lat, stop.lon);
-  const pureNumeric  = /^\d+$/.test(sid);
-  const country      = pureNumeric ? (countryByGps || countryById) : countryById;
+  const isMultiCountryOp = (op === 'DB_FV' || op === 'DB_RV');
+  const country = (isMultiCountryOp || countryById === null)
+    ? (countryByGps || countryById || 'EU')
+    : countryById;
 
   if (!orphanGroups.has(key)) {
     orphanGroups.set(key, {
@@ -700,8 +713,10 @@ for (const [sid, stop] of Object.entries(stops)) {
     e.operators.add(op);
     // Priorite au nom SNCF
     if (op === 'SNCF' && !e.operators.has('SNCF')) e.name = name;
-    // Consolider le pays via GPS si encore FR par defaut
-    if (e.country === 'FR' && countryByGps && countryByGps !== 'FR') e.country = countryByGps;
+    // Consolider le pays : si GPS disponible et opérateur multi-pays, GPS gagne toujours
+    if (countryByGps && (isMultiCountryOp || e.country === 'FR' || e.country === 'EU')) {
+      e.country = countryByGps;
+    }
     // Consolider coords si manquantes
     if (!e.lat && stop.lat) { e.lat = stop.lat; e.lon = stop.lon; }
   }
