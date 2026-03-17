@@ -51,7 +51,23 @@
     "gtfs_dir": "./gtfs/db_fv_filtered",
     "gtfs_download_dir": "./gtfs/db_fv",
     "gtfs_url": "https://download.gtfs.de/germany/fv_free/latest.zip",
-    "note": "Fernverkehr DB — ICE (grande vitesse), IC (Intercity), EC (EuroCity intercontinental), NJ (Nightjet, trains de nuit). Couvre tout le réseau grande vitesse allemand + liaisons Austria/Suisse/NL/BE/FR/DK. Source : gtfs.de (données DELFI/DB officiel, mises à jour quotidiennement). Filtré via filter_germany.js."
+    "note": "Fernverkehr DB — ICE (grande vitesse), IC (Intercity), EC (EuroCity intercontinental), NJ (Nightjet, trains de nuit). Couvre tout le réseau grande vitesse allemand + liaisons Austria/Suisse/NL/BE/FR/DK. Source : gtfs.de (données DELFI/DB officiel, mises à jour quotidiennement). Filtré via filter_germany.js.",
+    "agencies_in_feed": [
+      { "agency_id": "4",  "agency_name": "DB Fernverkehr AG" },
+      { "agency_id": "5",  "agency_name": "DB Fernverkehr (Codesharing)" },
+      { "agency_id": "6",  "agency_name": "SÜWEX" },
+      { "agency_id": "1",  "agency_name": "HZZP" },
+      { "agency_id": "2",  "agency_name": "Dänische Staatsbahnen (DSB)" },
+      { "agency_id": "3",  "agency_name": "MÁV (Hongrie)" },
+      { "agency_id": "7",  "agency_name": "SNCF (codeshare DB)" },
+      { "agency_id": "8",  "agency_name": "Nederlandse Spoorwegen (NS)" },
+      { "agency_id": "9",  "agency_name": "ZSSK (Slovaquie)" },
+      { "agency_id": "10", "agency_name": "SBB (Suisse)" },
+      { "agency_id": "11", "agency_name": "ÖBB (Autriche)" },
+      { "agency_id": "12", "agency_name": "PKP Intercity (Pologne)" },
+      { "agency_id": "13", "agency_name": "České dráhy (Tchéquie)" }
+    ],
+    "train_types": ["ICE", "IC_DB", "EC", "NIGHTJET", "RJ", "EN", "FLIXTRAIN", "TRAIN_DB"]
   },
   {
     "id": "UK",
