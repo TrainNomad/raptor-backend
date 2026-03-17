@@ -195,6 +195,17 @@ function extractCity(name) {
 }
 
 // ── Lecture du CSV ────────────────────────────────────────────────────────────
+function parseCSVLine(line) {
+  const result = []; let cur = ''; let inQ = false;
+  for (const c of line) {
+    if      (c === '"')             { inQ = !inQ; }
+    else if (c === ',' && !inQ)     { result.push(cur); cur = ''; }
+    else                            { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
 function parseCsv(filePath) {
   const lines = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '').split('\n');
   // Le fichier est délimité par des virgules — utiliser parseCSVLine qui gère
