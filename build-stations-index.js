@@ -572,18 +572,57 @@ function normalizeStationName(n) {
   return n.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[-_\s]+/g,' ');
 }
 function countryFromStopId(sid) {
-  if (sid.startsWith('UK:')) return 'GB';
+  if (sid.startsWith('UK:'))                        return 'GB';
   if (sid.startsWith('RENFE:') || sid.startsWith('OUIGO_ES:')) return 'ES';
-  if (sid.startsWith('CP:')) return 'PT';
-  if (sid.startsWith('SNCB:')) return 'BE';
-  if (sid.startsWith('TI:')) return 'IT';
+  if (sid.startsWith('CP:'))                        return 'PT';
+  if (sid.startsWith('SNCB:'))                      return 'BE';
+  if (sid.startsWith('TI:'))                        return 'IT';
+  if (sid.startsWith('DB_FV:') || sid.startsWith('DB_RV:')) return 'DE';
+  // UIC international 7–9 chiffres (SNCF, SNCB, DB numérique, etc.)
   const m = sid.match(/(\d{7,9})$/);
   if (!m) return 'FR';
-  const prefix = m[1].slice(0,2);
-  const map = {'87':'FR','86':'FR','88':'BE','80':'DE','81':'DE','82':'AT',
-               '83':'IT','84':'ES','85':'PT','70':'GB','71':'GB','74':'CH',
-               '79':'NL','78':'NL','55':'PL','54':'CZ','53':'SK'};
+  const prefix = m[1].slice(0, 2);
+  const map = {
+    '87':'FR','86':'FR',          // SNCF
+    '88':'BE',                    // SNCB
+    '80':'DE','81':'DE',          // DB
+    '82':'AT',                    // ÖBB
+    '83':'IT',                    // Trenitalia / RFI
+    '84':'ES',                    // Renfe
+    '85':'PT',                    // CP
+    '70':'GB','71':'GB',          // Network Rail UK
+    '74':'CH',                    // SBB
+    '79':'NL','78':'NL',          // NS
+    '55':'PL',                    // PKP
+    '54':'CZ',                    // ČD
+    '53':'SK',                    // ZSSK
+    '55':'HU',                    // MÁV (partage préfixe avec PL — voir UIC complet)
+    '79':'DK',                    // DSB (certains codes)
+    '75':'HR',                    // HŽ Croatie
+    '79':'SI',                    // SŽ Slovénie
+  };
   return map[prefix] || 'FR';
+}
+
+// Déduction du pays par coordonnées GPS (fallback pour stops numériques sans préfixe clair)
+function countryFromGPS(lat, lon) {
+  lat = parseFloat(lat); lon = parseFloat(lon);
+  if (!lat || !lon) return null;
+  if (lat >= 47.2 && lat <= 55.1 && lon >= 5.8  && lon <= 15.1) return 'DE';
+  if (lat >= 49.0 && lat <= 54.9 && lon >= 14.1 && lon <= 24.2) return 'PL';
+  if (lat >= 46.4 && lat <= 49.0 && lon >= 9.5  && lon <= 17.2) return 'AT';
+  if (lat >= 54.5 && lat <= 57.8 && lon >= 8.0  && lon <= 15.3) return 'DK';
+  if (lat >= 47.7 && lat <= 49.6 && lon >= 16.8 && lon <= 22.6) return 'SK';
+  if (lat >= 45.7 && lat <= 48.6 && lon >= 16.1 && lon <= 22.9) return 'HU';
+  if (lat >= 45.4 && lat <= 47.1 && lon >= 13.3 && lon <= 16.6) return 'SI';
+  if (lat >= 45.1 && lat <= 46.6 && lon >= 13.5 && lon <= 19.5) return 'HR';
+  if (lat >= 43.5 && lat <= 47.2 && lon >= 6.6  && lon <= 14.0) return 'IT';
+  if (lat >= 45.8 && lat <= 47.8 && lon >= 5.9  && lon <= 10.6) return 'CH';
+  if (lat >= 49.5 && lat <= 51.6 && lon >= 2.5  && lon <= 6.5)  return 'BE';
+  if (lat >= 50.5 && lat <= 53.6 && lon >= 2.5  && lon <= 7.2)  return 'NL';
+  if (lat >= 48.5 && lat <= 51.1 && lon >= 12.1 && lon <= 18.9) return 'CZ';
+  if (lat >= 45.8 && lat <= 51.5 && lon >= 2.0  && lon <= 8.5)  return 'FR';
+  return null;
 }
 const stopIdToStation = new Map();
 for (let i = 0; i < stations.length; i++) {
@@ -591,29 +630,59 @@ for (let i = 0; i < stations.length; i++) {
 }
 const orphanGroups = new Map();
 for (const [sid, stop] of Object.entries(stops)) {
+  // ES: et UK: ont deja leur propre bloc de ramassage ci-dessus
   if (assignedStops.has(sid) || sid.startsWith('ES:') || sid.startsWith('UK:')) continue;
+
+  // Rattachement a une gare SNCF existante via StopArea parent
   const parentArea = (xfer[sid] || []).map(xferId).find(v => v.startsWith('SNCF:StopArea:'));
   if (parentArea && stopIdToStation.has(parentArea)) {
     const pst = stations[stopIdToStation.get(parentArea)];
     if (!pst.stopIds.includes(sid)) pst.stopIds.push(sid);
     assignedStops.add(sid); continue;
   }
+
   const op   = stop.operator || extractOperator(sid);
   const name = stop.name || sid;
   const key  = normalizeStationName(name);
+
+  // Pays : prefixe stop ID en priorite, GPS en fallback (utile pour stops numeriques DB)
+  const countryById  = countryFromStopId(sid);
+  const countryByGps = countryFromGPS(stop.lat, stop.lon);
+  const pureNumeric  = /^\d+$/.test(sid);
+  const country      = pureNumeric ? (countryByGps || countryById) : countryById;
+
   if (!orphanGroups.has(key)) {
-    orphanGroups.set(key, { name, country: countryFromStopId(sid),
-      lat: stop.lat||0, lon: stop.lon||0, stopIds: [sid], operators: new Set([op]) });
+    orphanGroups.set(key, {
+      name, country,
+      lat: stop.lat || 0, lon: stop.lon || 0,
+      stopIds: [sid], operators: new Set([op]),
+    });
   } else {
     const e = orphanGroups.get(key);
-    e.stopIds.push(sid); e.operators.add(op);
+    e.stopIds.push(sid);
+    e.operators.add(op);
+    // Priorite au nom SNCF
     if (op === 'SNCF' && !e.operators.has('SNCF')) e.name = name;
+    // Consolider le pays via GPS si encore FR par defaut
+    if (e.country === 'FR' && countryByGps && countryByGps !== 'FR') e.country = countryByGps;
+    // Consolider coords si manquantes
+    if (!e.lat && stop.lat) { e.lat = stop.lat; e.lon = stop.lon; }
   }
 }
+
+let nbAllOrphans = 0;
+const orphansByCountry = {};
 for (const e of orphanGroups.values()) {
-  stations.push({ ...e, city: extractCity(e.name), slug: '',
-    operators: [...e.operators].sort(), sncf_id:null, ti_id:null, uic8:null });
+  stations.push({
+    ...e, city: extractCity(e.name), slug: '',
+    operators: [...e.operators].sort(),
+    sncf_id: null, ti_id: null, uic8: null,
+  });
+  orphansByCountry[e.country] = (orphansByCountry[e.country] || 0) + 1;
+  nbAllOrphans++;
 }
+console.log('  Gares orphelines ajoutees : ' + nbAllOrphans);
+console.log('  Repartition : ' + Object.entries(orphansByCountry).sort((a,b)=>b[1]-a[1]).map(([k,v])=>k+'='+v).join(', '));
 
 // ── Post-processing : fusion ES-only + gares SNCF (via validEsTransfers) ──────
 const stopIdToStationIdx = {};
@@ -655,13 +724,14 @@ if (toRemoveIdxs.size) console.log('  ' + toRemoveIdxs.size + ' gare(s) ES-only 
 // ── Tri : SNCF > ES > TI > RENFE > SNCB > CP > UK > autres ──────────────────
 stations.sort((a, b) => {
   const score = s =>
-    (s.operators.includes('SNCF')     ? 128 : 0) +
-    (s.operators.includes('ES')       ?  64 : 0) +
-    (s.operators.includes('TI')       ?  32 : 0) +
-    (s.operators.includes('SNCB')     ?  16 : 0) +
-    (s.operators.includes('RENFE')    ?   8 : 0) +
-    (s.operators.includes('OUIGO_ES') ?   4 : 0) +
-    (s.operators.includes('CP')       ?   2 : 0) +
+    (s.operators.includes('SNCF')     ? 256 : 0) +
+    (s.operators.includes('ES')       ? 128 : 0) +
+    (s.operators.includes('TI')       ?  64 : 0) +
+    (s.operators.includes('SNCB')     ?  32 : 0) +
+    (s.operators.includes('RENFE')    ?  16 : 0) +
+    (s.operators.includes('OUIGO_ES') ?   8 : 0) +
+    (s.operators.includes('CP')       ?   4 : 0) +
+    (s.operators.includes('DB_FV')    ?   2 : 0) +
     (s.operators.includes('UK')       ?   1 : 0);
   if (score(b) !== score(a)) return score(b) - score(a);
   return a.name.localeCompare(b.name, 'fr');
@@ -925,6 +995,12 @@ const CHECK = [
   'London Euston', 'London St Pancras International', 'Edinburgh Waverley',
   'Glasgow Central', 'Aberdeen', 'Inverness', 'Cardiff Central', 'Swansea',
   'Milano Centrale', 'Torino Porta Susa',
+  // DB / Europe centrale
+  'Berlin Hbf', 'Frankfurt(M) Hbf', 'München Hbf', 'Hamburg Hbf',
+  'Köln Hbf', 'Düsseldorf Hbf', 'Wien Hbf', 'Zürich HB',
+  'Warszawa Centralna', 'Kraków Główny', 'Praha hl.n.',
+  'Ljubljana', 'Zagreb Glavni kolodvor', 'Venezia Santa Lucia',
+  'Aachen Hbf', "'s-Hertogenbosch",
 ];
 for (const nom of CHECK) {
   const normN = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[\u2019']/g,"'");
