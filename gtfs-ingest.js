@@ -204,6 +204,10 @@ function shouldKeepRoute(operatorId, r) {
       // route_type 2 = rail standard, 100-199 = rail étendu (UK utilise 100-106)
       return rtype === 2 || (rtype >= 100 && rtype <= 199);
 
+    case 'EU_SLEEPER':
+      // European Sleeper — train de nuit, tout est ferroviaire (pas de bus)
+      return rtype !== 3;
+
     default:
       // TI, ES, DB : garder tout le ferroviaire
       return rtype !== 3;
@@ -388,6 +392,9 @@ function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
         default:   return 'UK_RAIL';
       }
     }
+
+    case 'EU_SLEEPER':
+      return 'EUROPEAN_SLEEPER';
 
     default:
       return 'TRAIN';

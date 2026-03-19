@@ -100,6 +100,7 @@ function downloadNAP(op) {
 (async function() {
   // Ignorer UK (Partie 1) et DB_FV (Partie 3 — download séparé)
   const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI' && op.id !== 'DB_FV' && op.id !== 'DB_RV');
+  // EU_SLEEPER est inclus dans filtered : téléchargé via gtfs_url directe automatiquement
 
   for (const op of filtered) {
     try {
