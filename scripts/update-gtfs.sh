@@ -138,9 +138,15 @@ node filter_germany.js
 # ─────────────────────────────────────────────────────────────────────────────
 echo "📥 Téléchargement Pays-Bas openOV (NS · Arriva · Blauwnet · Eurobahn · VIAS)..."
 mkdir -p ./gtfs/nl_full
-curl -L -s \
-  "https://gtfs.ovapi.nl/nl/gtfs-openov-nl.zip" \
+curl -L -s --fail \
+  "https://gtfs.ovapi.nl/openov-nl/gtfs-openov-nl.zip" \
   -o /tmp/gtfs_nl_full.zip
+# Vérifier que c'est bien un zip (pas une page d'erreur HTML)
+if ! unzip -t /tmp/gtfs_nl_full.zip > /dev/null 2>&1; then
+  echo "❌  Le fichier téléchargé n'est pas un zip valide (URL invalide ou serveur indisponible)"
+  echo "   URL utilisée : http://gtfs.ovapi.nl/gtfs-nl.zip"
+  exit 1
+fi
 unzip -o /tmp/gtfs_nl_full.zip -d ./gtfs/nl_full > /dev/null
 
 echo "⚙️  Filtrage NL (trains uniquement — exclusion bus/tram/métro/ferry/doublons)..."
