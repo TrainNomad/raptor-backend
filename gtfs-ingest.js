@@ -208,6 +208,11 @@ function shouldKeepRoute(operatorId, r) {
       // European Sleeper — train de nuit, tout est ferroviaire (pas de bus)
       return rtype !== 3;
 
+    case 'NL':
+      // Déjà filtré par filter_netherlands.js (agences IFF:* ferroviaires uniquement)
+      // Garder route_type 2 + 100-106 (exclure banlieue 109, bus 3/700, tram 900, ferry 1000)
+      return rtype === 2 || (rtype >= 100 && rtype <= 106);
+
     default:
       // TI, ES, DB : garder tout le ferroviaire
       return rtype !== 3;
@@ -395,6 +400,30 @@ function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
 
     case 'EU_SLEEPER':
       return 'EUROPEAN_SLEEPER';
+
+    case 'NL': {
+      // NS / NS International / Arriva NL / Blauwnet / Eurobahn / VIAS / GoVolta
+      const agency = (agencyCode || '').toUpperCase();
+      const rs     = (routeShort || '').trim().toUpperCase();
+      // NS International — trains Thalys/ICE/Eurostar opérés côté NL
+      if (agency === 'IFF:NS_INT') {
+        if (rs.includes('ICE') || tid.includes('ICE'))       return 'ICE';
+        if (rs.includes('THA') || tid.includes('THALYS'))    return 'THALYS_CORRIDOR';
+        return 'IC_NS_INT';
+      }
+      // Eurobahn et VIAS — liaisons transfrontalières DE↔NL
+      if (agency === 'IFF:EUROBAHN') return 'IC_DB';   // codeshare DB en pratique
+      if (agency === 'IFF:VIAS')     return 'IC_DB';   // liaison Frankfurt–Amsterdam (VIAS)
+      // NS Intercity-Direct (Sprinter haute fréquence) et IC national
+      if (rs === 'IC' || rs === 'ICD' || rs === 'INTERCITY-DIRECT') return 'IC_NS';
+      if (rs === 'SPR' || rs === 'SPRINTER') return 'IC_NS'; // Sprinter = réseau NS
+      // Arriva NL / Blauwnet / GoVolta / R-net NS — trains régionaux
+      if (agency === 'IFF:ARRIVA' || agency === 'IFF:BLAUWNET_A' ||
+          agency === 'IFF:BLAUWNET_K' || agency === 'IFF:GV' ||
+          agency === 'IFF:R-NET_NS') return 'IC_NS'; // trains régionaux NL
+      // NS fallback
+      return 'IC_NS';
+    }
 
     default:
       return 'TRAIN';

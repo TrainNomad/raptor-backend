@@ -99,8 +99,9 @@ function downloadNAP(op) {
 // ─── Boucle principale ────────────────────────────────────────────────────────
 (async function() {
   // Ignorer UK (Partie 1) et DB_FV (Partie 3 — download séparé)
-  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI' && op.id !== 'DB_FV' && op.id !== 'DB_RV');
+  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI' && op.id !== 'DB_FV' && op.id !== 'DB_RV' && op.id !== 'NL');
   // EU_SLEEPER est inclus dans filtered : téléchargé via gtfs_url directe automatiquement
+  // NL est exclu ici : téléchargement + filtrage séparé (Partie 5)
 
   for (const op of filtered) {
     try {
@@ -131,6 +132,19 @@ unzip -o /tmp/gtfs_db_fv.zip -d ./gtfs/db_fv > /dev/null
 
 echo "⚙️  Filtrage Allemagne FV (exclusion non-ferroviaire)..."
 node filter_germany.js
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 5 — Pays-Bas (openOV — NS · Arriva · Blauwnet · Eurobahn · VIAS)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement Pays-Bas openOV (NS · Arriva · Blauwnet · Eurobahn · VIAS)..."
+mkdir -p ./gtfs/nl_full
+curl -L -s \
+  "https://gtfs.ovapi.nl/nl/gtfs-openov-nl.zip" \
+  -o /tmp/gtfs_nl_full.zip
+unzip -o /tmp/gtfs_nl_full.zip -d ./gtfs/nl_full > /dev/null
+
+echo "⚙️  Filtrage NL (trains uniquement — exclusion bus/tram/métro/ferry/doublons)..."
+node filter_netherlands.js
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PARTIE 4 — Ingestion RAPTOR + index stations
