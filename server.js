@@ -944,14 +944,6 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // ── /health — utilisé par Render (Health Check Path) ─────────────────────────
-  if (p === '/health') {
-    const memMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    if (!engineReady) return jsonResp(res, { ok: false, ready: false, memory_mb: memMb, message: '⏳ Chargement…' }, 503);
-    if (memMb > 420)  return jsonResp(res, { ok: false, ready: true, overloaded: true, memory_mb: memMb, message: '⚠️ Mémoire critique' }, 429);
-    return jsonResp(res, { ok: true, ready: true, uptime_s: Math.floor(process.uptime()), memory_mb: memMb, loaded_at: engineLoadedAt });
-  }
-
   // Bloquer les routes API tant que l'engine n'est pas prêt
   if (p.startsWith('/api/') && !engineReady) {
     return jsonResp(res, {
@@ -1159,7 +1151,7 @@ const server = http.createServer(async (req, res) => {
 // le port est ouvert). L'engine se charge en arrière-plan : /eveille répond
 // pendant ce temps, les autres routes retournent 503 jusqu'à engineReady=true.
 
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, () => {
   console.log('🌐 http://localhost:' + PORT + '  (moteur en cours de chargement…)');
   try {
     initEngine();
