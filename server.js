@@ -944,41 +944,6 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // ── /health — endpoint utilisé par le failover multi-instances ───────────────
-  // Retourne 200 si le moteur est prêt et la charge acceptable.
-  // Retourne 503 si le moteur démarre encore.
-  // Retourne 429 si la charge mémoire est critique (bascule vers autre instance).
-  if (p === '/health') {
-    const memMb = process.memoryUsage().rss / 1024 / 1024;
-    const overloaded = memMb > 420; // Render free = 512 MB, seuil de sécurité à 420 MB
-    if (!engineReady) {
-      return jsonResp(res, {
-        ok: false, ready: false, uptime_s: Math.floor(process.uptime()),
-        memory_mb: Math.round(memMb), message: '⏳ Chargement en cours…',
-      }, 503);
-    }
-    if (overloaded) {
-      return jsonResp(res, {
-        ok: false, ready: true, overloaded: true,
-        memory_mb: Math.round(memMb), message: '⚠️ Mémoire critique — bascule recommandée',
-      }, 429);
-    }
-    return jsonResp(res, {
-      ok: true, ready: true,
-      uptime_s:  Math.floor(process.uptime()),
-      memory_mb: Math.round(memMb),
-      loaded_at: engineLoadedAt,
-      load_ms:   engineLoadMs,
-      message:   '✅ Opérationnel',
-    });
-  }
-
-  // ── /api/backends-status — état de toutes les instances (debug) ──────────────
-  if (p === '/api/backends-status') {
-    const { getStatus } = require('./backends');
-    return jsonResp(res, { backends: getStatus(), checked_at: new Date().toISOString() });
-  }
-
   // Bloquer les routes API tant que l'engine n'est pas prêt
   if (p.startsWith('/api/') && !engineReady) {
     return jsonResp(res, {
