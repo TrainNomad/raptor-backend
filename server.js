@@ -1151,7 +1151,7 @@ const server = http.createServer(async (req, res) => {
 // le port est ouvert). L'engine se charge en arrière-plan : /eveille répond
 // pendant ce temps, les autres routes retournent 503 jusqu'à engineReady=true.
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log('🌐 http://localhost:' + PORT + '  (moteur en cours de chargement…)');
   try {
     initEngine();
