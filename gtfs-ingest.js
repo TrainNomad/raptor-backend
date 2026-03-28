@@ -213,6 +213,18 @@ function shouldKeepRoute(operatorId, r) {
       // Garder route_type 2 + 100-106 (exclure banlieue 109, bus 3/700, tram 900, ferry 1000)
       return rtype === 2 || (rtype >= 100 && rtype <= 106);
 
+    case 'TI_IT': {
+      // Déjà filtré par filter_trenitalia.js (FR, FA, FB, IC, ICN, EC, EN uniquement)
+      // Exclure banlieue SFM (109), bus (3/700), tram (900)
+      const TI_IT_EXCL = new Set([3, 109, 400, 401, 700, 900, 1000]);
+      if (TI_IT_EXCL.has(rtype)) return false;
+      return rtype === 2 || (rtype >= 100 && rtype <= 102);
+    }
+
+    case 'NTV':
+      // NTV/Italo — feed propre, tout est AV ou Night, pas de bus
+      return rtype !== 3;
+
     default:
       // TI, ES, DB : garder tout le ferroviaire
       return rtype !== 3;
@@ -309,7 +321,34 @@ function detectTrainType(operatorId, stopId, tripId, routeShort, agencyCode) {
     }
 
     case 'TI':
+      // Trenitalia France (Paris–Lyon–Milan) — uniquement Frecciarossa international
       return 'FRECCIAROSSA';
+
+    case 'TI_IT': {
+      // Trenitalia Italia — détection précise par route_short_name
+      const rs = (routeShort || '').trim().toUpperCase();
+      if (rs === 'FR')                        return 'FRECCIAROSSA';
+      if (rs === 'FA')                        return 'FRECCIARGENTO';
+      if (rs === 'FB')                        return 'FRECCIABIANCA';
+      if (rs === 'ICN')                       return 'ICN';
+      if (rs === 'IC')                        return 'IC_TI';
+      if (rs === 'EC')                        return 'EC';
+      if (rs === 'EN')                        return 'EN';
+      if (rs === 'NJ')                        return 'NIGHTJET';
+      if (rs === 'AV' || rs.startsWith('AV')) return 'FRECCIAROSSA';
+      // Fallback sur trip_id
+      if (tid.startsWith('FR') || tid.includes('_FR_')) return 'FRECCIAROSSA';
+      if (tid.startsWith('FA') || tid.includes('_FA_')) return 'FRECCIARGENTO';
+      if (tid.startsWith('FB') || tid.includes('_FB_')) return 'FRECCIABIANCA';
+      if (tid.includes('ICN'))                          return 'ICN';
+      if (tid.includes('_IC_') || tid.startsWith('IC')) return 'IC_TI';
+      if (tid.includes('_EC_') || tid.startsWith('EC')) return 'EC';
+      return 'FRECCIAROSSA'; // fallback ultime (feed TI_IT = que du longue distance)
+    }
+
+    case 'NTV':
+      // Italo NTV — haute vitesse italienne alternative
+      return 'ITALO';
 
     case 'ES':
       return 'EUROSTAR';

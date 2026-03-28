@@ -8,6 +8,7 @@ set -e
 #  Dépendances (même dossier) :
 #    filter_avanti.js        — filtre les données UK Rail → UK National
 #    filter_germany.js       — filtre Allemagne FV (ICE · IC · EC · NJ)
+#    filter_trenitalia.js    — filtre Trenitalia Italia (FR · FA · FB · IC · ICN · EC)
 #    gtfs-ingest.js          — ingestion RAPTOR multi-opérateurs
 #    build-stations-index.js — index des stations
 #    operators.json          — liste des opérateurs
@@ -98,9 +99,9 @@ function downloadNAP(op) {
 
 // ─── Boucle principale ────────────────────────────────────────────────────────
 (async function() {
-  // Ignorer UK (Partie 1) et DB_FV (Partie 3 — download séparé)
-  const filtered = ops.filter(op => op.id !== 'UK' && op.id !== 'AVANTI' && op.id !== 'DB_FV' && op.id !== 'DB_RV');
-  // EU_SLEEPER est inclus dans filtered : téléchargé via gtfs_url directe automatiquement
+  // Ignorer UK (Partie 1), DB_FV (Partie 3), TI_IT et NTV (Partie 3bis — download séparé)
+  const SKIP_IDS = new Set(['UK', 'AVANTI', 'DB_FV', 'DB_RV', 'TI_IT', 'NTV']);
+  const filtered = ops.filter(op => !SKIP_IDS.has(op.id));
 
   for (const op of filtered) {
     try {
@@ -132,6 +133,47 @@ unzip -o /tmp/gtfs_db_fv.zip -d ./gtfs/db_fv > /dev/null
 echo "⚙️  Filtrage Allemagne FV (exclusion non-ferroviaire)..."
 node filter_germany.js
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 3bis — Trenitalia Italia (FR · FA · FB · IC · ICN · EC · EN)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement Trenitalia Italia (FR · FA · FB · IC · ICN · EC)..."
+mkdir -p ./gtfs/trenitalia_it
+
+# URL directe opendata FS — portail dati.gov.it
+# Si cette URL change, consulter : https://www.dati.gov.it/view-dataset/dataset?id=trenitalia-gtfs
+curl -L -s \
+  "https://www.dati.gov.it/view-dataset/dataset?id=trenitalia-gtfs" \
+  -o /tmp/gtfs_ti_it.zip 2>/dev/null || true
+
+# Fallback mirror TransitFeeds si l'URL officielle échoue
+if [ ! -s /tmp/gtfs_ti_it.zip ]; then
+  echo "  ⚠️  URL officielle inaccessible — tentative mirror transitfeeds..."
+  curl -L -s \
+    "https://transitfeeds.com/p/trenitalia/888/latest/download" \
+    -o /tmp/gtfs_ti_it.zip
+fi
+
+unzip -o /tmp/gtfs_ti_it.zip -d ./gtfs/trenitalia_it > /dev/null
+echo "⚙️  Filtrage Trenitalia Italia (exclusion Regionale/SFM)..."
+node filter_trenitalia.js
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PARTIE 3ter — NTV / Italo (haute vitesse italienne alternative)
+# ─────────────────────────────────────────────────────────────────────────────
+echo "📥 Téléchargement NTV/Italo..."
+mkdir -p ./gtfs/ntv
+
+curl -L -s \
+  "https://www.italotreno.it/sites/default/files/gtfs.zip" \
+  -o /tmp/gtfs_ntv.zip
+
+# Vérifier que le téléchargement a réussi avant d'extraire
+if [ -s /tmp/gtfs_ntv.zip ]; then
+  unzip -o /tmp/gtfs_ntv.zip -d ./gtfs/ntv > /dev/null
+  echo "  ✅ NTV/Italo extrait dans ./gtfs/ntv"
+else
+  echo "  ⚠️  NTV/Italo : téléchargement vide ou inaccessible — opérateur ignoré pour cette mise à jour"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PARTIE 4 — Ingestion RAPTOR + index stations

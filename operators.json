@@ -18,6 +18,34 @@
     "gtfs_url": "https://thello.axelor.com/public/gtfs/gtfs.zip"
   },
   {
+    "id": "TI_IT",
+    "name": "Trenitalia Italia (Frecciarossa · Frecciargento · Frecciabianca · Intercity · IC Notte · EuroCity)",
+    "gtfs_dir": "./gtfs/trenitalia_it_filtered",
+    "gtfs_download_dir": "./gtfs/trenitalia_it",
+    "gtfs_url": "https://www.dati.gov.it/view-dataset/dataset?id=trenitalia-gtfs",
+    "gtfs_url_direct": "https://transitfeeds.com/p/trenitalia/888/latest/download",
+    "note": "Feed officiel Trenitalia Italia (portail opendata FS / dati.gov.it). Filtré via filter_trenitalia.js — conserve FR (Frecciarossa), FA (Frecciargento), FB (Frecciabianca), IC (Intercity), ICN (Intercity Notte), EC (EuroCity), EN (EuroNight). Exclut Regionale (R), Regionale Veloce (RV) et SFM (suburbain). Mis à jour hebdomadaire via GitHub Actions.",
+    "train_types": [
+      "FRECCIAROSSA",
+      "FRECCIARGENTO",
+      "FRECCIABIANCA",
+      "IC_TI",
+      "ICN",
+      "EC",
+      "EN"
+    ]
+  },
+  {
+    "id": "NTV",
+    "name": "Italo NTV (AV · Evo · Night)",
+    "gtfs_dir": "./gtfs/ntv",
+    "gtfs_url": "https://www.italotreno.it/sites/default/files/gtfs.zip",
+    "note": "Feed officiel NTV/Italo — haute vitesse concurrente de Trenitalia sur le réseau AV. Couvre Roma ↔ Milano, Torino, Napoli, Venezia, Firenze, Bologna, Salerno. Inclut Italo Night (trains de nuit). URL directe publique, pas de clé API.",
+    "train_types": [
+      "ITALO"
+    ]
+  },
+  {
     "id": "EU_SLEEPER",
     "name": "European Sleeper (Amsterdam · Bruxelles · Berlin · Prague · Vienne)",
     "gtfs_dir": "./gtfs/eu_sleeper",
@@ -30,7 +58,6 @@
     "gtfs_dir": "./gtfs/sncb",
     "gtfs_url": "https://api-management-discovery-production.azure-api.net/api/gtfs/feed/nmbssncb/static"
   },
-
   {
     "id": "RENFE",
     "name": "Renfe (AVE · Larga Distancia · Media Distancia)",
@@ -61,68 +88,22 @@
     "gtfs_url": "https://download.gtfs.de/germany/fv_free/latest.zip",
     "note": "Fernverkehr DB — ICE (grande vitesse), IC (Intercity), EC (EuroCity intercontinental), NJ (Nightjet, trains de nuit). Couvre tout le réseau grande vitesse allemand + liaisons Austria/Suisse/NL/BE/FR/DK. Source : gtfs.de (données DELFI/DB officiel, mises à jour quotidiennement). Filtré via filter_germany.js.",
     "agencies_in_feed": [
-      {
-        "agency_id": "4",
-        "agency_name": "DB Fernverkehr AG"
-      },
-      {
-        "agency_id": "5",
-        "agency_name": "DB Fernverkehr (Codesharing)"
-      },
-      {
-        "agency_id": "6",
-        "agency_name": "SÜWEX"
-      },
-      {
-        "agency_id": "1",
-        "agency_name": "HZZP"
-      },
-      {
-        "agency_id": "2",
-        "agency_name": "Dänische Staatsbahnen (DSB)"
-      },
-      {
-        "agency_id": "3",
-        "agency_name": "MÁV (Hongrie)"
-      },
-      {
-        "agency_id": "7",
-        "agency_name": "SNCF (codeshare DB)"
-      },
-      {
-        "agency_id": "8",
-        "agency_name": "Nederlandse Spoorwegen (NS)"
-      },
-      {
-        "agency_id": "9",
-        "agency_name": "ZSSK (Slovaquie)"
-      },
-      {
-        "agency_id": "10",
-        "agency_name": "SBB (Suisse)"
-      },
-      {
-        "agency_id": "11",
-        "agency_name": "ÖBB (Autriche)"
-      },
-      {
-        "agency_id": "12",
-        "agency_name": "PKP Intercity (Pologne)"
-      },
-      {
-        "agency_id": "13",
-        "agency_name": "České dráhy (Tchéquie)"
-      }
+      { "agency_id": "4",  "agency_name": "DB Fernverkehr AG" },
+      { "agency_id": "5",  "agency_name": "DB Fernverkehr (Codesharing)" },
+      { "agency_id": "6",  "agency_name": "SÜWEX" },
+      { "agency_id": "1",  "agency_name": "HZZP" },
+      { "agency_id": "2",  "agency_name": "Dänische Staatsbahnen (DSB)" },
+      { "agency_id": "3",  "agency_name": "MÁV (Hongrie)" },
+      { "agency_id": "7",  "agency_name": "SNCF (codeshare DB)" },
+      { "agency_id": "8",  "agency_name": "Nederlandse Spoorwegen (NS)" },
+      { "agency_id": "9",  "agency_name": "ZSSK (Slovaquie)" },
+      { "agency_id": "10", "agency_name": "SBB (Suisse)" },
+      { "agency_id": "11", "agency_name": "ÖBB (Autriche)" },
+      { "agency_id": "12", "agency_name": "PKP Intercity (Pologne)" },
+      { "agency_id": "13", "agency_name": "České dráhy (Tchéquie)" }
     ],
     "train_types": [
-      "ICE",
-      "IC_DB",
-      "EC",
-      "NIGHTJET",
-      "RJ",
-      "EN",
-      "FLIXTRAIN",
-      "TRAIN_DB"
+      "ICE", "IC_DB", "EC", "NIGHTJET", "RJ", "EN", "FLIXTRAIN", "TRAIN_DB"
     ]
   },
   {
