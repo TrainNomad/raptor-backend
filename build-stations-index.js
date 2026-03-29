@@ -43,9 +43,10 @@ function xferId(v) { return (typeof v === 'string') ? v : v.id; }
 
 console.log('  stops.json    : ' + Object.keys(stops).length + ' stops');
 
-// ── Index 1 : UIC → stop_ids (SNCF + TI + SNCB) ──────────────────────────────
+// ── Index 1 : UIC → stop_ids (SNCF + TI + TI_AV + SNCB) ─────────────────────
 // SNCF  : SNCF:StopPoint:OCE...-87XXXXXX  → UIC = dernier groupe numérique
 // TI    : TI:12345678                      → UIC = 12345678
+// TI_AV : TI_AV:12345678                  → UIC = 12345678 (feed GitHub TrainNomad)
 // SNCB  : SNCB:8814001                    → UIC = 8814001
 const uic8ToStops = {};
 for (const [sid, stop] of Object.entries(stops)) {
@@ -54,8 +55,8 @@ for (const [sid, stop] of Object.entries(stops)) {
   if (op === 'SNCF') {
     const m = sid.match(/-(\d{7,8})$/) || sid.match(/OCE(\d{7,8})$/);
     if (m) uicKey = m[1];
-  } else if (op === 'TI') {
-    const m = sid.match(/^TI:(\d+)$/);
+  } else if (op === 'TI' || op === 'TI_AV') {
+    const m = sid.match(/^(?:TI|TI_AV):(\d+)$/);
     if (m) uicKey = m[1];
   } else if (op === 'SNCB') {
     const m = sid.match(/^SNCB:(\d+)$/);
@@ -269,10 +270,11 @@ for (const row of csvRows) {
       if (!assignedStops.has(sid)) { allStopIds.add(sid); operators.add(extractOperator(sid)); }
     }
   }
-  // (3) TI via trenitalia_id
+  // (3) TI / TI_AV via trenitalia_id (feed Trenitalia France ou feed GitHub TrainNomad)
   if (tiId && isTiEn) {
     for (const sid of (uic8ToStops[tiId] || [])) {
-      if (!assignedStops.has(sid) && extractOperator(sid) === 'TI') {
+      const tOp = extractOperator(sid);
+      if (!assignedStops.has(sid) && (tOp === 'TI' || tOp === 'TI_AV')) {
         allStopIds.add(sid); operators.add('TI'); nbFusionsTI++;
       }
     }
@@ -576,7 +578,7 @@ function countryFromStopId(sid) {
   if (sid.startsWith('RENFE:') || sid.startsWith('OUIGO_ES:')) return 'ES';
   if (sid.startsWith('CP:'))                        return 'PT';
   if (sid.startsWith('SNCB:'))                      return 'BE';
-  if (sid.startsWith('TI:'))                        return 'IT';
+  if (sid.startsWith('TI:') || sid.startsWith('TI_AV:')) return 'IT';
   // DB_FV/DB_RV couvrent DE + AT + PL + CH + IT + SI + HR + SK + HU + NL + BE + DK + CZ + FR
   // Le préfixe seul ne donne pas le pays — laisser countryFromGPS décider
   if (sid.startsWith('DB_FV:') || sid.startsWith('DB_RV:')) return null;
@@ -779,6 +781,7 @@ stations.sort((a, b) => {
     (s.operators.includes('SNCF')     ? 256 : 0) +
     (s.operators.includes('ES')       ? 128 : 0) +
     (s.operators.includes('TI')       ?  64 : 0) +
+    (s.operators.includes('TI_AV')    ?  64 : 0) +
     (s.operators.includes('SNCB')     ?  32 : 0) +
     (s.operators.includes('RENFE')    ?  16 : 0) +
     (s.operators.includes('OUIGO_ES') ?   8 : 0) +
@@ -1047,11 +1050,14 @@ const CHECK = [
   'London Euston', 'London St Pancras International', 'Edinburgh Waverley',
   'Glasgow Central', 'Aberdeen', 'Inverness', 'Cardiff Central', 'Swansea',
   'Milano Centrale', 'Torino Porta Susa',
+  // Italie AV (TI_AV)
+  'Roma Termini', 'Firenze Santa Maria Novella', 'Napoli Centrale',
+  'Venezia Santa Lucia', 'Bologna Centrale', 'Torino Porta Nuova',
   // DB / Europe centrale
   'Berlin Hbf', 'Frankfurt(M) Hbf', 'München Hbf', 'Hamburg Hbf',
   'Köln Hbf', 'Düsseldorf Hbf', 'Wien Hbf', 'Zürich HB',
   'Warszawa Centralna', 'Kraków Główny', 'Praha hl.n.',
-  'Ljubljana', 'Zagreb Glavni kolodvor', 'Venezia Santa Lucia',
+  'Ljubljana', 'Zagreb Glavni kolodvor',
   'Aachen Hbf', "'s-Hertogenbosch",
 ];
 for (const nom of CHECK) {

@@ -19,11 +19,10 @@
   },
   {
     "id": "TI_AV",
-    "name": "Trenitalia Italia (FR · FA · FB · IC · ICN · EC)",
+    "name": "Trenitalia Italia (AV · IC)",
+    "gtfs_url": "https://github.com/TrainNomad/trenitalia_gtfs/raw/main/gtfs.zip",
     "gtfs_dir": "./gtfs/trenitalia_it_api",
-    "gtfs_unzip_dir": "./gtfs/trenitalia_it_api",
-    "gtfs_url": "https://github.com/TrainNomad/trenitalia_gtfs/raw/main/ITALIE/gtfs/trenitalia_it_api/gtfs.zip",
-    "note": "Feed GTFS manuel — FR (Frecciarossa), FA (Frecciargento), FB (Frecciabianca), IC (Intercity), ICN (Intercity Notte), EC (EuroCity). 42 gares, 54 corridors AV + Intercity. Ficher stocke dans le repo TrainNomad/trenitalia_gtfs (raw GitHub). Le ZIP contient les fichiers GTFS a la racine -> extraction directe dans ./gtfs/trenitalia_it_api/."
+    "note": "Source: GitHub TrainNomad (GTFS pré-généré)"
   },
   {
     "id": "EU_SLEEPER",
