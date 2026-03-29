@@ -38,14 +38,7 @@
     "gtfs_dir": "./gtfs/sncb",
     "gtfs_url": "https://api-management-discovery-production.azure-api.net/api/gtfs/feed/nmbssncb/static"
   },
-  {
-    "id": "NL",
-    "name": "Pays-Bas (NS · NS Int · Arriva · Blauwnet · Eurobahn · VIAS · GoVolta)",
-    "gtfs_dir": "./gtfs/nl_rail_filtered",
-    "gtfs_download_dir": "./gtfs/nl_full",
-    "gtfs_url": "https://gtfs.ovapi.nl/nl/gtfs-openov-nl.zip",
-    "note": "Feed openOV Pays-Bas complet — filtré via filter_netherlands.js. Conserve uniquement IFF:NS, IFF:NS_INT, IFF:ARRIVA, IFF:BLAUWNET_*, IFF:EUROBAHN, IFF:VIAS, IFF:GV, IFF:R-NET_NS. Exclut bus, tram, métro, ferry et doublons non-IFF."
-  },
+
   {
     "id": "RENFE",
     "name": "Renfe (AVE · Larga Distancia · Media Distancia)",
