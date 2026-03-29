@@ -11,6 +11,9 @@ set -e
 #    gtfs-ingest.js          — ingestion RAPTOR multi-opérateurs
 #    build-stations-index.js — index des stations
 #    operators.json          — liste des opérateurs
+#
+#  Sections non-bloquantes (set -e suspendu localement) :
+#    PARTIE 2b — TI_AV : skippée si la GitHub Release n'existe pas encore
 # =============================================================================
 
 TRANSITLAND_API_KEY="${TRANSITLAND_API_KEY:-iSQvk8H4v8dTBm5rACmwsV6gLqks8laM}"
@@ -121,22 +124,40 @@ function downloadNAP(op) {
 ENDNODE
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  PARTIE 2b — Trenitalia Italia AV+IC (GitHub Release auto-générée)
-#  Le ZIP contient le dossier trenitalia_it_api/ → extraire dans ./gtfs/
+#  PARTIE 2b — Trenitalia Italia AV+IC (raw GitHub)
+#  ZIP stocké dans TrainNomad/trenitalia_gtfs — fichiers GTFS à la racine du ZIP
+#  → extraction directe dans ./gtfs/trenitalia_it_api/
+#  Non bloquant : skip propre si le fichier est inaccessible
 # ─────────────────────────────────────────────────────────────────────────────
-echo "📥 Téléchargement Trenitalia Italia AV+IC (GitHub Release)..."
+echo "📥 Téléchargement Trenitalia Italia AV+IC (GitHub raw)..."
 
 mkdir -p ./gtfs/trenitalia_it_api
 
-curl -L -s \
-  "https://github.com/TrainNomad/trenitalia_gtfs/releases/download/latest-gtfs/trenitalia_gtfs.zip" \
-  -o /tmp/gtfs_ti_av.zip
+TI_AV_URL="https://github.com/TrainNomad/trenitalia_gtfs/raw/main/ITALIE/gtfs/trenitalia_it_api/gtfs.zip"
+TI_AV_ZIP="/tmp/gtfs_ti_av.zip"
 
-# Le ZIP contient trenitalia_it_api/*.txt → extraire dans ./gtfs/
-unzip -o /tmp/gtfs_ti_av.zip -d ./gtfs > /dev/null
+set +e  # section non-bloquante — une erreur ici ne stoppe pas le deploy
 
-echo "  OK TI_AV extrait dans ./gtfs/trenitalia_it_api/"
-echo "  Fichiers : $(ls ./gtfs/trenitalia_it_api/*.txt 2>/dev/null | wc -l) .txt"
+# -L : suit les redirects GitHub → raw.githubusercontent.com
+# -w : capture le code HTTP dans HTTP_CODE, le corps dans le fichier
+HTTP_CODE=$(curl -L -s -w "%{http_code}" -o "$TI_AV_ZIP" "$TI_AV_URL")
+
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "  ⚠️  TI_AV ignoré — fichier non disponible (HTTP $HTTP_CODE)"
+  echo "      URL : $TI_AV_URL"
+elif ! unzip -t "$TI_AV_ZIP" > /dev/null 2>&1; then
+  echo "  ⚠️  TI_AV ignoré — fichier téléchargé invalide (pas un ZIP valide)"
+  echo "      HTTP_CODE=$HTTP_CODE — contenu reçu :"
+  head -c 200 "$TI_AV_ZIP" | cat
+else
+  # Le ZIP contient les fichiers GTFS à la racine (agency.txt, routes.txt…)
+  # → on extrait directement dans ./gtfs/trenitalia_it_api/
+  unzip -o "$TI_AV_ZIP" -d ./gtfs/trenitalia_it_api > /dev/null
+  echo "  ✅ TI_AV extrait dans ./gtfs/trenitalia_it_api/"
+  echo "     Fichiers : $(ls ./gtfs/trenitalia_it_api/*.txt 2>/dev/null | wc -l) .txt"
+fi
+
+set -e  # reprendre le mode strict
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PARTIE 3 — Allemagne Fernverkehr (ICE · IC · EC · NJ)
