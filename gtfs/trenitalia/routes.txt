@@ -1,0 +1,32 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+6104,TI, Marseille-St-Charles/Paris-Gare-de-Lyon, Marseille-St-Charles/Paris-Gare-de-Lyon,2
+6105,TI, Paris-Gare-de-Lyon/Marseille-St-Charles, Paris-Gare-de-Lyon/Marseille-St-Charles,2
+6658,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+6655,TI, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs,2
+6648,TI, ---/---, ---/---,2
+6147,TI, Paris-Gare-de-Lyon/Marseille-St-Charles, Paris-Gare-de-Lyon/Marseille-St-Charles,2
+6659,TI, ---/---, ---/---,2
+9287,TI,30-50194974-1-40 Paris-Gare-de-Lyon/Milano Centrale,30-50194974-1-40 Paris-Gare-de-Lyon/Milano Centrale,2
+6645,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+9283,TI,30-50294507-1-40 Paris-Gare-de-Lyon/Milano Centrale,30-50294507-1-40 Paris-Gare-de-Lyon/Milano Centrale,2
+9296,TI,30-49982794-1-40 Milano Centrale/Paris-Gare-de-Lyon,30-49982794-1-40 Milano Centrale/Paris-Gare-de-Lyon,2
+6140,TI, ---/---, ---/---,2
+9292,TI,30-50154404-1-40 Milano Centrale/Paris-Gare-de-Lyon,30-50154404-1-40 Milano Centrale/Paris-Gare-de-Lyon,2
+6654,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+6656,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+6651,TI, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs,2
+6119,TI, ---/---, ---/---,2
+6148,TI, Marseille-St-Charles/Paris-Gare-de-Lyon, Marseille-St-Charles/Paris-Gare-de-Lyon,2
+6660,TI, ---/---, ---/---,2
+6653,TI, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs,2
+9281,TI,30-50294402-1-40 Paris-Gare-de-Lyon/Milano Centrale,30-50294402-1-40 Paris-Gare-de-Lyon/Milano Centrale,2
+6108,TI, Marseille-St-Charles/Paris-Gare-de-Lyon, Marseille-St-Charles/Paris-Gare-de-Lyon,2
+6652,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+6650,TI, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon, Lyon-Perrache-Voyageurs/Paris-Gare-de-Lyon,2
+6647,TI, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs,2
+6657,TI, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs, Paris-Gare-de-Lyon/Lyon-Perrache-Voyageurs,2
+6113,TI, ---/---, ---/---,2
+6662,TI, ---/---, ---/---,2
+6649,TI, ---/---, ---/---,2
+6635,TI, ---/---, ---/---,2
+6146,TI, Marseille-St-Charles/Paris-Gare-de-Lyon, Marseille-St-Charles/Paris-Gare-de-Lyon,2

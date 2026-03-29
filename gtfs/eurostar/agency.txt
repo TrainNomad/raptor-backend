@@ -1,0 +1,4 @@
+agency_id,agency_name,agency_url,agency_timezone,agency_lang,agency_phone,agency_fare_url,agency_email
+THALYS,Eurostar,https://www.eurostar.com,Europe/Brussels,en,+32 (0)2 400 67 76,https://eurostar.com,info@eurostar.com
+EUROSTAR_CHANNEL,Eurostar,https://www.eurostar.com,Europe/Brussels,en,+32 (0)2 400 67 76,https://eurostar.com,info@eurostar.com
+EUROSTAR_CONTINENTAL,Eurostar,https://www.eurostar.com,Europe/Brussels,en,+32 (0)2 400 67 76,https://eurostar.com,info@eurostar.com
