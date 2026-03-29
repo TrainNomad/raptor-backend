@@ -18,12 +18,10 @@
     "gtfs_url": "https://thello.axelor.com/public/gtfs/gtfs.zip"
   },
   {
-    "id": "TI_AV",
-    "name": "Trenitalia Italia (AV · IC)",
-    "gtfs_url": "https://github.com/TrainNomad/trenitalia_gtfs/raw/main/gtfs.zip",
-    "gtfs_dir": "./gtfs/trenitalia_it_api",
-    "note": "Source: GitHub TrainNomad (GTFS pré-généré)"
-  },
+  "id": "TI_AV",
+  "gtfs_url": "https://github.com/TrainNomad/trenitalia_gtfs/releases/download/latest/gtfs.zip",
+  "gtfs_dir": "./gtfs/trenitalia_it_api"
+},
   {
     "id": "EU_SLEEPER",
     "name": "European Sleeper (Amsterdam · Bruxelles · Berlin · Prague · Vienne)",
