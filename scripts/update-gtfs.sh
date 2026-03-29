@@ -125,7 +125,7 @@ ENDNODE
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PARTIE 2b — Trenitalia Italia AV+IC (raw GitHub)
-#  ZIP stocké dans TrainNomad/trenitalia_gtfs — fichiers GTFS à la racine du ZIP
+#  URL lue depuis operators.json (champ gtfs_url de l'entrée id=TI_AV)
 #  → extraction directe dans ./gtfs/trenitalia_it_api/
 #  Non bloquant : skip propre si le fichier est inaccessible
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,31 +133,47 @@ echo "📥 Téléchargement Trenitalia Italia AV+IC (GitHub raw)..."
 
 mkdir -p ./gtfs/trenitalia_it_api
 
-TI_AV_URL="https://github.com/TrainNomad/trenitalia_gtfs/raw/main/ITALIE/gtfs/trenitalia_it_api/gtfs.zip"
+# Lire l'URL depuis operators.json (source unique de vérité)
+TI_AV_URL=$(node -e "const ops=require('./operators.json'); const op=ops.find(o=>o.id==='TI_AV'); console.log(op ? op.gtfs_url : '');")
 TI_AV_ZIP="/tmp/gtfs_ti_av.zip"
 
-set +e  # section non-bloquante — une erreur ici ne stoppe pas le deploy
+echo "  URL : $TI_AV_URL"
 
-# -L : suit les redirects GitHub → raw.githubusercontent.com
-# -w : capture le code HTTP dans HTTP_CODE, le corps dans le fichier
-HTTP_CODE=$(curl -L -s -w "%{http_code}" -o "$TI_AV_ZIP" "$TI_AV_URL")
-
-if [ "$HTTP_CODE" != "200" ]; then
-  echo "  ⚠️  TI_AV ignoré — fichier non disponible (HTTP $HTTP_CODE)"
-  echo "      URL : $TI_AV_URL"
-elif ! unzip -t "$TI_AV_ZIP" > /dev/null 2>&1; then
-  echo "  ⚠️  TI_AV ignoré — fichier téléchargé invalide (pas un ZIP valide)"
-  echo "      HTTP_CODE=$HTTP_CODE — contenu reçu :"
-  head -c 200 "$TI_AV_ZIP" | cat
+if [ -z "$TI_AV_URL" ]; then
+  echo "  ⚠️  TI_AV ignoré — pas de gtfs_url dans operators.json"
 else
-  # Le ZIP contient les fichiers GTFS à la racine (agency.txt, routes.txt…)
-  # → on extrait directement dans ./gtfs/trenitalia_it_api/
-  unzip -o "$TI_AV_ZIP" -d ./gtfs/trenitalia_it_api > /dev/null
-  echo "  ✅ TI_AV extrait dans ./gtfs/trenitalia_it_api/"
-  echo "     Fichiers : $(ls ./gtfs/trenitalia_it_api/*.txt 2>/dev/null | wc -l) .txt"
-fi
+  set +e  # section non-bloquante — une erreur ici ne stoppe pas le deploy
 
-set -e  # reprendre le mode strict
+  # -L : suit les redirects GitHub → raw.githubusercontent.com
+  # -w : capture le code HTTP dans HTTP_CODE, le corps dans le fichier
+  HTTP_CODE=$(curl -L -s -w "%{http_code}" -o "$TI_AV_ZIP" "$TI_AV_URL")
+
+  if [ "$HTTP_CODE" != "200" ]; then
+    echo "  ⚠️  TI_AV ignoré — fichier non disponible (HTTP $HTTP_CODE)"
+    echo "      URL : $TI_AV_URL"
+  elif ! unzip -t "$TI_AV_ZIP" > /dev/null 2>&1; then
+    echo "  ⚠️  TI_AV ignoré — fichier téléchargé invalide (pas un ZIP valide)"
+    echo "      HTTP_CODE=$HTTP_CODE — contenu reçu :"
+    head -c 300 "$TI_AV_ZIP" | cat
+  else
+    # Le ZIP contient les fichiers GTFS à la racine (agency.txt, routes.txt…)
+    # → on extrait directement dans ./gtfs/trenitalia_it_api/
+    unzip -o "$TI_AV_ZIP" -d ./gtfs/trenitalia_it_api > /dev/null
+    echo "  ✅ TI_AV extrait dans ./gtfs/trenitalia_it_api/"
+    echo "     Fichiers : $(ls ./gtfs/trenitalia_it_api/*.txt 2>/dev/null | wc -l) .txt"
+    echo "     Contenu  : $(ls ./gtfs/trenitalia_it_api/*.txt 2>/dev/null | xargs -I{} basename {} | tr '\n' ' ')"
+    # Vérification rapide : stops.txt présent et non vide ?
+    if [ -f ./gtfs/trenitalia_it_api/stops.txt ]; then
+      echo "     stops.txt : $(wc -l < ./gtfs/trenitalia_it_api/stops.txt) lignes"
+      echo "     Exemple   : $(head -2 ./gtfs/trenitalia_it_api/stops.txt | tail -1 | cut -c1-80)"
+    else
+      echo "  ⚠️  stops.txt absent du ZIP — structure inattendue"
+      echo "     Contenu ZIP : $(unzip -l "$TI_AV_ZIP" | head -15)"
+    fi
+  fi
+
+  set -e  # reprendre le mode strict
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PARTIE 3 — Allemagne Fernverkehr (ICE · IC · EC · NJ)
