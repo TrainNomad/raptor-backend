@@ -97,6 +97,20 @@ for (const [sid, stop] of Object.entries(stops)) {
 }
 console.log('  Index RENFE   : ' + Object.keys(renfeToStops).length + ' codes');
 
+// ── Index 3b : db_id → stop_ids (DB_FV) ──────────────────────────────────────
+// Utilisé pour les gares IT/AT/CH/PL/CZ/HR/SI desservies par DB_FV
+// Le CSV Trainline a db_is_enabled=f pour les gares IT (Trenitalia est prioritaire)
+// mais on indexe quand même pour rattacher ces stops orphelins via db_id du CSV.
+const dbFvToStops = {};
+for (const [sid] of Object.entries(stops)) {
+  const m = sid.match(/^DB_FV:(\d+)$/);
+  if (m) {
+    if (!dbFvToStops[m[1]]) dbFvToStops[m[1]] = [];
+    dbFvToStops[m[1]].push(sid);
+  }
+}
+console.log('  Index DB_FV   : ' + Object.keys(dbFvToStops).length + ' codes');
+
 // ── Index 4 : UIC Portugal → stop_ids (CP) ────────────────────────────────────
 // CP:94_2006 → suffix int=2006 → UIC = '94' + '2006'.padStart(5,'0') = '9402006'
 // CP:94_30007 → suffix=30007 → UIC = '9430007'
@@ -327,6 +341,16 @@ for (const row of csvRows) {
   if (atocId && isAtocEn) {
     for (const sid of (atocToStops[atocId.toUpperCase()] || [])) {
       if (!assignedStops.has(sid)) { allStopIds.add(sid); operators.add('UK'); }
+    }
+  }
+  // (8b) DB_FV via db_id du CSV — pour gares IT/AT/CH/PL/CZ/HR/SI
+  // db_is_enabled peut être 'f' (cas Italie) mais on rattache quand même
+  // pour éviter que ces stops restent orphelins et non-routables.
+  // On limite aux pays où DB_FV est la seule source longue-distance disponible.
+  const dbId = row.db_id?.trim();
+  if (dbId && country !== 'FR' && country !== 'ES' && country !== 'PT' && country !== 'GB' && country !== 'BE') {
+    for (const sid of (dbFvToStops[dbId] || [])) {
+      if (!assignedStops.has(sid)) { allStopIds.add(sid); operators.add('DB_FV'); }
     }
   }
   // (9) Propagation transfer_index (SNCF/TI/SNCB/RENFE/CP — pas ES ni UK déjà couverts)
