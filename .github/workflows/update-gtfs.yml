@@ -1,203 +1,104 @@
-name: Update GTFS Weekly
+name: Update GTFS Data
+
+
+permissions:
+  contents: write  # Autorise le bot à faire des push
 
 on:
   schedule:
-    - cron: '0 3 * * 1'   # Chaque lundi à 3h UTC
-  workflow_dispatch:        # Permet aussi de le lancer manuellement
+    # Tous les jours à 3h00 UTC
+    - cron: '0 3 * * *'
+  # Permet de déclencher manuellement depuis l'onglet Actions
+  workflow_dispatch:
+
 
 jobs:
-  # ────────────────────────────────────────────────────────────────────────────
-  # JOB 1 — UK Rail (Avanti West Coast + Caledonian Sleeper)
-  # Source  : http://gtfs-source-feeds.transit.land/uk-rail.zip
-  # Filtrage: inline Python (aucun fichier ajouté au repo)
-  # Résultat: gtfs/uk_ld/ commité (~30-80 MB vs ~2-3 GB brut)
-  # ────────────────────────────────────────────────────────────────────────────
-  update-uk-gtfs:
-    name: 🇬🇧 UK Rail — Avanti + Caledonian Sleeper
+  update-gtfs:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 60
 
     steps:
-      - name: 📥 Checkout
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # On a besoin de l'historique complet pour pouvoir push sur deploy
+          fetch-depth: 0
 
-      - name: 📡 Télécharger GTFS UK (transitland)
+      # ── 2. Node.js ───────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --omit=dev
+
+      # ── 3. Outils système ─────────────────────────────────────────────────────
+      - name: Install system dependencies
         run: |
-          echo "⬇️  Téléchargement uk-rail.zip depuis transitland..."
-          curl -L "http://gtfs-source-feeds.transit.land/uk-rail.zip" \
-            -o /tmp/uk-rail.zip \
-            --retry 3 --retry-delay 15 --max-time 900 \
-            -A "TrainNomad/1.0 (contact@trainnomad.eu)"
-          echo "✅ Téléchargement terminé — $(du -sh /tmp/uk-rail.zip | cut -f1)"
+          sudo apt-get update -qq
+          sudo apt-get install -y unzip curl
 
-          echo "📦 Décompression..."
-          mkdir -p /tmp/uk_raw
-          unzip -q /tmp/uk-rail.zip -d /tmp/uk_raw/
-          rm /tmp/uk-rail.zip
-          echo "Fichiers disponibles :"
-          ls -lh /tmp/uk_raw/
-          echo "Lignes stop_times : $(wc -l < /tmp/uk_raw/stop_times.txt)"
+      # ── 4. Téléchargement + ingestion GTFS ───────────────────────────────────
+      - name: Download & ingest GTFS feeds
+        env:
+          TRANSITLAND_API_KEY: ${{ secrets.TRANSITLAND_API_KEY }}
+          NAP_API_KEY: ${{ secrets.NAP_API_KEY }}
+          # Node.js limité à 3 GB sur le runner GitHub (7 GB dispo)
+          NODE_OPTIONS: "--max-old-space-size=3072"
+        run: bash update-gtfs.sh
 
-      - name: ✂️  Filtrer — Avanti (VT) + Caledonian Sleeper (CS)
+      # ── 5. Prétraitement station-based (ingest_v2) ────────────────────────────
+      - name: Build station index (ingest_v2)
+        env:
+          NODE_OPTIONS: "--max-old-space-size=3072"
+        run: node ingest_v2.js
+
+      # ── 6. Vérification que engine_data est non vide ─────────────────────────
+      - name: Verify engine_data
         run: |
-          mkdir -p gtfs/uk_ld
+          echo "=== Contenu engine_data/ ==="
+          ls -lh engine_data/
+          # Vérification minimale : les fichiers critiques doivent exister
+          for f in stops.json route_trips.json transfer_index.json stations.bin stop_to_station.json; do
+            if [ ! -f "engine_data/$f" ]; then
+              echo "❌  Fichier manquant : engine_data/$f"
+              exit 1
+            fi
+          done
+          echo "✅  Tous les fichiers critiques présents"
+          echo "=== Tailles ==="
+          du -sh engine_data/*.json engine_data/*.bin 2>/dev/null | sort -h
 
-          python3 << 'PYTHON_EOF'
-          import os, csv, time, sys
-
-          SRC = "/tmp/uk_raw"
-          DST = "gtfs/uk_ld"
-          # agency_ids à conserver
-          # VT = Avanti West Coast, CS = Caledonian Sleeper
-          KEEP = {"VT", "CS"}
-
-          def reader(name):
-              path = os.path.join(SRC, name)
-              if not os.path.exists(path):
-                  print(f"  ⚠  {name} absent — ignoré")
-                  return None, None
-              f = open(path, "r", encoding="utf-8-sig", errors="replace")
-              r = csv.DictReader(f)
-              return f, r
-
-          def writer(name, fieldnames):
-              path = os.path.join(DST, name)
-              f = open(path, "w", encoding="utf-8", newline="")
-              w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-              w.writeheader()
-              return f, w
-
-          t0 = time.time()
-          print(f"🔍 Filtrage pour agences : {', '.join(sorted(KEEP))}")
-
-          # 1. agency.txt
-          f, r = reader("agency.txt")
-          if r:
-              rows = [row for row in r if row.get("agency_id","").strip() in KEEP]
-              f.close()
-              _, w = writer("agency.txt", r.fieldnames)
-              w.writerows(rows)
-              print(f"  agency    : {len(rows)} agences")
-
-          # 2. routes.txt → route_ids
-          f, r = reader("routes.txt")
-          route_ids = set()
-          if r:
-              kept = []
-              for row in r:
-                  aid   = row.get("agency_id","").strip()
-                  rtype = int(row.get("route_type","0") or 0)
-                  # rail = type 2 ou 100-199 (UK utilise 100-106)
-                  is_rail = rtype == 2 or (100 <= rtype <= 199)
-                  if aid in KEEP and is_rail:
-                      kept.append(row)
-                      route_ids.add(row["route_id"].strip())
-              f.close()
-              _, w = writer("routes.txt", r.fieldnames)
-              w.writerows(kept)
-              print(f"  routes    : {len(route_ids)}")
-
-          # 3. trips.txt → trip_ids + service_ids
-          f, r = reader("trips.txt")
-          trip_ids = set(); service_ids = set()
-          if r:
-              kept = []
-              for row in r:
-                  if row.get("route_id","").strip() in route_ids:
-                      kept.append(row)
-                      trip_ids.add(row["trip_id"].strip())
-                      service_ids.add(row["service_id"].strip())
-              f.close()
-              _, w = writer("trips.txt", r.fieldnames)
-              w.writerows(kept)
-              print(f"  trips     : {len(trip_ids)} | services : {len(service_ids)}")
-
-          # 4. stop_times.txt — streaming (fichier lourd)
-          f, r = reader("stop_times.txt")
-          stop_ids = set(); n = 0
-          if r:
-              fo, w = writer("stop_times.txt", r.fieldnames)
-              for i, row in enumerate(r):
-                  if row.get("trip_id","").strip() in trip_ids:
-                      w.writerow(row)
-                      stop_ids.add(row.get("stop_id","").strip())
-                      n += 1
-                  if i % 500_000 == 0 and i > 0:
-                      print(f"    {i:,} lignes lues, {n:,} conservées…")
-              f.close(); fo.close()
-              print(f"  stop_times: {n:,} lignes | {len(stop_ids)} stops")
-
-          # 5. stops.txt
-          f, r = reader("stops.txt")
-          if r:
-              kept = []
-              for row in r:
-                  sid   = row.get("stop_id","").strip()
-                  ltype = row.get("location_type","0").strip()
-                  if sid in stop_ids or ltype == "1":
-                      kept.append(row)
-              f.close()
-              _, w = writer("stops.txt", r.fieldnames)
-              w.writerows(kept)
-              print(f"  stops     : {len(kept)}")
-
-          # 6. calendar.txt
-          f, r = reader("calendar.txt")
-          if r:
-              kept = [row for row in r if row.get("service_id","").strip() in service_ids]
-              f.close()
-              _, w = writer("calendar.txt", r.fieldnames)
-              w.writerows(kept)
-              print(f"  calendar  : {len(kept)} services")
-
-          # 7. calendar_dates.txt
-          f, r = reader("calendar_dates.txt")
-          if r:
-              kept = [row for row in r if row.get("service_id","").strip() in service_ids]
-              f.close()
-              _, w = writer("calendar_dates.txt", r.fieldnames)
-              w.writerows(kept)
-              print(f"  cal_dates : {len(kept)} exceptions")
-
-          print(f"\n✅ Filtrage terminé en {time.time()-t0:.1f}s")
-          print(f"Taille dossier : ", end="")
-          sys.stdout.flush()
-          PYTHON_EOF
-
-          du -sh gtfs/uk_ld/
-          echo "Fichiers générés :"
-          ls -lh gtfs/uk_ld/
-
-      - name: 🗑️  Nettoyer données brutes
-        run: rm -rf /tmp/uk_raw/
-
-      - name: 💾 Commit GTFS UK filtré
+      # ── 7. Push sur la branche deploy ────────────────────────────────────────
+      # Render surveille cette branche et redéploie automatiquement à chaque push.
+      # On ne pousse que le dossier engine_data (pas les GTFS bruts ~500 MB).
+      - name: Configure git
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gtfs/uk_ld/
-          if git diff --staged --quiet; then
-            echo "✅ Aucun changement — pas de commit."
-          else
-            git commit -m "🇬🇧 GTFS UK (Avanti + Caledonian Sleeper) — $(date -u '+%Y-%m-%d')"
-            git push
-            echo "✅ Commit effectué."
-          fi
 
-  # ────────────────────────────────────────────────────────────────────────────
-  # JOB 2 — Trigger Render redeploy (après la MAJ GTFS)
-  # Attend que le job UK soit terminé (needs: update-uk-gtfs)
-  # ────────────────────────────────────────────────────────────────────────────
-  deploy:
-    name: 🚀 Redéployer Render
-    runs-on: ubuntu-latest
-    needs: update-uk-gtfs   # attend la fin du job UK
-    if: always()             # redéploie même si le job UK n'a pas changé de données
-
-    steps:
-      - name: Trigger Render redeploy
+      - name: Push engine_data to deploy branch
         run: |
-          curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          # Récupérer ou créer la branche deploy
+          git fetch origin deploy 2>/dev/null || true
+          git checkout -B deploy origin/deploy 2>/dev/null || git checkout -B deploy
+
+          # Rebase sur main pour garder le code source à jour
+          git merge origin/main --no-edit --strategy-option=ours
+
+          # Forcer l'inclusion de engine_data (normalement dans .gitignore)
+          git add -f engine_data/
+
+          # Ne committer que si quelque chose a changé
+          if git diff --staged --quiet; then
+            echo "ℹ️  Aucun changement dans engine_data — pas de push"
+          else
+            DATESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
+            git commit -m "chore: update engine_data [${DATESTAMP}]"
+            git push origin deploy --force-with-lease
+            echo "✅  engine_data poussé sur la branche deploy"
+          fi
+        
