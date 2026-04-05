@@ -89,8 +89,8 @@ jobs:
           # Rebase sur main pour garder le code source à jour
           git merge origin/main --no-edit --strategy-option=ours
 
-          # Forcer l'inclusion de engine_data (normalement dans .gitignore)
-          git add -f engine_data/
+          # Forcer l'inclusion de engine_data et stations.json (normalement dans .gitignore)
+          git add -f engine_data/ stations.json
 
           # Ne committer que si quelque chose a changé
           if git diff --staged --quiet; then
@@ -101,4 +101,3 @@ jobs:
             git push origin deploy --force-with-lease
             echo "✅  engine_data poussé sur la branche deploy"
           fi
-        
